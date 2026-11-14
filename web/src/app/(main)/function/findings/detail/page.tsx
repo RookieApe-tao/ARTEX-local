@@ -178,6 +178,7 @@ function FindingDetailInner() {
         <TabsList>
           <TabsTrigger value="overview">概览</TabsTrigger>
           <TabsTrigger value="lineage">链路图</TabsTrigger>
+          <TabsTrigger value="delivery-report">交付报告</TabsTrigger>
         </TabsList>
       </header>
 
@@ -275,12 +276,6 @@ function FindingDetailInner() {
                   )}
                 </CardContent>
               </Card>
-              <DeliveryReportSection
-                content={finding.delivery_report}
-                cvssVector={finding.delivery_report_cvss_vector}
-                stale={finding.delivery_report_stale}
-                hasDetailedReport={Boolean(finding.report)}
-              />
             </div>
 
             {/* 右栏：状态区 */}
@@ -396,6 +391,15 @@ function FindingDetailInner() {
         {/* 链路图：从任务初始节点回溯到本漏洞节点的攻击链路 */}
         <TabsContent value="lineage" className="mt-0">
           <FindingLineageView findingId={finding.id} />
+        </TabsContent>
+
+        <TabsContent value="delivery-report" className="mt-0">
+          <DeliveryReportSection
+            content={finding.delivery_report}
+            cvssVector={finding.delivery_report_cvss_vector}
+            stale={finding.delivery_report_stale}
+            hasDetailedReport={Boolean(finding.report)}
+          />
         </TabsContent>
       </div>
     </Tabs>

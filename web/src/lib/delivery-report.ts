@@ -1,6 +1,7 @@
 import { scoreCVSS4Base } from "./cvss-v4";
 
 const metadataPatterns = [
+  /^漏洞名称[：:].*$/,
   /^- \*\*CVSS 4\.0 Base 向量（CVSS-B）\*\*：.*$/,
   /^- \*\*CVSS 4\.0 评分\*\*：.*$/,
   /^- \*\*漏洞等级\*\*：.*$/,
@@ -13,18 +14,12 @@ export function applyCVSSMetadata(content: string, vector: string): string {
   const scoreText = score ? score.score.toFixed(1) : "待计算";
   const severity = score ? score.severity : "待计算";
   const singleLine = `CVSS 4.0：${vector}  评分 ${scoreText}（${severity}）`;
-  const legacyLines = [
-    `- **CVSS 4.0 Base 向量（CVSS-B）**：${vector}`,
-    `- **CVSS 4.0 评分**：${score ? `${score.score.toFixed(1)}（CVSS-B）` : "待计算"}`,
-    `- **漏洞等级**：${severity}`,
-  ];
   const lines = content.split("\n");
-  const metadata = new Map<number, number>();
+  const metadata = new Set<number>();
   let bodyStart = lines.length;
-  let titleIndex = -1;
   let fence = "";
 
-  // 只改报告头，避免把请求、响应正文中的同名字段当作评分信息改写。
+  // 只整理报告头，避免把代码块中的报文内容当成重复字段。
   for (const [index, line] of lines.entries()) {
     const fenceMatch = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
     if (fenceMatch) {
@@ -38,33 +33,23 @@ export function applyCVSSMetadata(content: string, vector: string): string {
       bodyStart = index;
       break;
     }
-    if (titleIndex < 0 && /^ {0,3}#\s+/.test(line)) titleIndex = index;
-    const kind = metadataPatterns.findIndex((pattern) => pattern.test(line.replace(/\r$/, "")));
-    if (kind >= 0) metadata.set(index, kind);
+    if (metadataPatterns.some((pattern) => pattern.test(line.replace(/\r$/, "")))) metadata.add(index);
   }
 
-  const useSingleLine = [...metadata.values()].includes(3) || metadata.size === 0;
-  const written = new Set<number>();
-  const header: string[] = [];
-  let titleEnd = 0;
-  for (const [index, line] of lines.slice(0, bodyStart).entries()) {
-    const kind = metadata.get(index);
-    if (kind === undefined) header.push(line);
-    else if (useSingleLine) {
-      if (kind === 3 && !written.has(3)) {
-        written.add(3);
-        header.push(singleLine);
-      }
-    } else if (!written.has(kind)) {
-      written.add(kind);
-      header.push(legacyLines[kind]);
-    }
-    if (index === titleIndex) titleEnd = header.length;
+  const header = lines.slice(0, bodyStart).filter((_, index) => !metadata.has(index));
+  while (header.length && !header[0].trim()) header.shift();
+  while (header.length && !header[header.length - 1].trim()) header.pop();
+  const cleanedTitleIndex = header.findIndex((line) => /^ {0,3}#\s+/.test(line));
+  let normalizedHeader: string[];
+  if (cleanedTitleIndex >= 0) {
+    const title = header.slice(0, cleanedTitleIndex + 1);
+    const details = header.slice(cleanedTitleIndex + 1);
+    normalizedHeader = [...title, "", singleLine];
+    if (details.length) normalizedHeader.push("", ...details);
+  } else {
+    normalizedHeader = [singleLine, ...header];
   }
-  let missing = legacyLines.filter((_, index) => !written.has(index));
-  if (useSingleLine) missing = written.has(3) ? [] : [singleLine];
-  if (missing.length) {
-    header.splice(titleEnd, 0, "", ...missing, "");
-  }
-  return [...header, ...lines.slice(bodyStart)].join("\n");
+  const body = lines.slice(bodyStart);
+  if (body.length) normalizedHeader.push("");
+  return [...normalizedHeader, ...body].join("\n");
 }

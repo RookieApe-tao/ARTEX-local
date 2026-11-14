@@ -173,6 +173,77 @@ func deliveryMarkdownHeading(line string) (int, string) {
 	return level, text
 }
 
+func deliveryAttackChainHasTree(report string) bool {
+	start, end := -1, len(report)
+	inAttackChain := false
+	walkDeliveryMarkdown(report, func(line string, offset int) {
+		level, title := deliveryMarkdownHeading(line)
+		if level != 2 {
+			return
+		}
+		if inAttackChain && end == len(report) {
+			end = offset
+		}
+		inAttackChain = title == "攻击链路"
+		if inAttackChain {
+			start = offset + len(line)
+		}
+	})
+	if start < 0 || end < start {
+		return false
+	}
+
+	body := report[start:end]
+	var fence byte
+	fenceLength := 0
+	textFence := false
+	treeRoot := false
+	for offset := 0; offset < len(body); {
+		next := len(body)
+		lineEnd := strings.IndexByte(body[offset:], '\n')
+		if lineEnd >= 0 {
+			next = offset + lineEnd + 1
+			lineEnd += offset
+		}
+		line := strings.TrimSuffix(body[offset:lineEnd], "\r")
+		offset = next
+		trimmed := strings.TrimSpace(line)
+		if fence != 0 {
+			run := 0
+			for run < len(trimmed) && trimmed[run] == fence {
+				run++
+			}
+			if run >= fenceLength && strings.TrimSpace(trimmed[run:]) == "" {
+				fence, fenceLength, textFence = 0, 0, false
+				continue
+			}
+			if textFence {
+				for _, branch := range []string{"├─", "└─"} {
+					if strings.HasPrefix(trimmed, branch) && strings.TrimSpace(strings.TrimPrefix(trimmed, branch)) != "" {
+						if treeRoot {
+							return true
+						}
+						continue
+					}
+				}
+				if trimmed != "" && !strings.HasPrefix(trimmed, "├─") && !strings.HasPrefix(trimmed, "└─") {
+					treeRoot = true
+				}
+			}
+			continue
+		}
+		marker, length := deliveryOpeningFence(line)
+		if marker == 0 {
+			continue
+		}
+		fence, fenceLength = marker, length
+		info := strings.Fields(strings.TrimSpace(trimmed[length:]))
+		textFence = len(info) > 0 && info[0] == "text"
+		treeRoot = false
+	}
+	return false
+}
+
 func validateDeliveryReportTemplate(report, expectedVector string) error {
 	report = stripDeliveryTrafficEvidence(report)
 	sections := strings.Split(agent.DeliveryReportSectionOrder, "、")
@@ -189,7 +260,7 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 	}
 	sectionIndex, bodyStart := -1, 0
 	subsectionIndex, subsectionStart := -1, 0
-	title, name, cvss := false, false, false
+	title, cvss := false, false
 	var problem string
 	checkSubsection := func(end int) {
 		if subsectionIndex >= 0 && !deliverySectionHasContent(report[subsectionStart:end]) {
@@ -245,22 +316,31 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 		}
 		if sectionIndex < 0 {
 			trimmed := strings.TrimSpace(line)
-			for _, prefix := range []string{"漏洞名称：", "漏洞名称:"} {
-				if strings.HasPrefix(trimmed, prefix) && strings.TrimSpace(strings.TrimPrefix(trimmed, prefix)) != "" {
-					name = true
-				}
+			if strings.HasPrefix(trimmed, "漏洞名称：") || strings.HasPrefix(trimmed, "漏洞名称:") {
+				problem = "一级标题已经是漏洞名称，不要重复输出“漏洞名称”字段"
+				return
+			}
+			if strings.HasPrefix(trimmed, "- **CVSS 4.0") || strings.HasPrefix(trimmed, "- **漏洞等级") {
+				problem = "CVSS 向量、分数和等级必须合并为一行，不要重复列出"
+				return
 			}
 			for _, prefix := range []string{"CVSS 4.0：", "CVSS 4.0:"} {
 				if strings.HasPrefix(trimmed, prefix) {
 					fields := strings.Fields(strings.TrimPrefix(trimmed, prefix))
-					if len(fields) > 0 {
-						vector, valid := normalizeCVSS4BaseVector(fields[0])
-						if cvss || (valid && vector != expectedVector) {
-							problem = "CVSS 报告头重复或与 cvss_vector 参数不一致"
-							return
-						}
-						cvss = cvss || valid
+					if cvss {
+						problem = "CVSS 报告头重复"
+						return
 					}
+					if len(fields) == 0 {
+						problem = "CVSS 报告头缺少完整 Base 向量"
+						return
+					}
+					vector, valid := normalizeCVSS4BaseVector(fields[0])
+					if !valid || vector != expectedVector {
+						problem = "CVSS 报告头无效或与 cvss_vector 参数不一致"
+						return
+					}
+					cvss = true
 				}
 			}
 		}
@@ -271,8 +351,8 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 	if problem == "" && !closed {
 		problem = "代码块或 HTML 注释未闭合"
 	}
-	if problem == "" && (!title || !name || !cvss) {
-		problem = "报告头须包含一级标题、非空“漏洞名称：”及“CVSS 4.0：”完整 Base 向量"
+	if problem == "" && (!title || !cvss) {
+		problem = "报告头须包含作为漏洞名称的一级标题及一行“CVSS 4.0：”完整 Base 向量"
 	}
 	if problem == "" && sectionIndex != len(sections)-1 {
 		problem = "缺少必需章节"
@@ -290,6 +370,9 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 		if len(missing) > 0 {
 			problem = "缺少必需三级标题：" + strings.Join(missing, "、")
 		}
+	}
+	if problem == "" && !deliveryAttackChainHasTree(report) {
+		problem = "“攻击链路”必须包含 text 代码块树形链路，且有起点和带内容的分支"
 	}
 	if problem != "" {
 		return fmt.Errorf("交付报告格式不符合固定模板：%s；二级标题必须按顺序为：%s。请保留各节，证据不足写“未验证”，补齐后重新保存", problem, agent.DeliveryReportSectionOrder)

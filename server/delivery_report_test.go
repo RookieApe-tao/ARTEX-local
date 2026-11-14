@@ -379,7 +379,6 @@ VALUES(?,?,?,?,?)`, id, requestHead, responseHead, []byte(requestBody), []byte(r
 func deliveryReportFixture(description, vector string) string {
 	return fmt.Sprintf(`# 测试系统-模块 /test 测试缺陷：测试结果
 
-漏洞名称：测试系统-模块 /test 测试缺陷
 CVSS 4.0：%s  评分 待计算（待计算）
 
 ## 描述
@@ -406,7 +405,10 @@ CVSS 4.0：%s  评分 待计算（待计算）
 
 ## 攻击链路
 
-利用前提和影响未验证。
+~~~text
+账号权限和利用前提未验证
+└─ 请求结果和业务影响未验证
+~~~
 
 ## 证据说明
 
