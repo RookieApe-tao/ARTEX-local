@@ -179,6 +179,9 @@ class ReportEvaluationTest(unittest.TestCase):
                         "case_ids": sorted(EVAL.cases_by_id()),
                         "model": "fixture-model",
                         "provider_source": "fixture",
+                        "format": "openai",
+                        "thinking_type": "enabled",
+                        "reasoning_effort": "high",
                         "max_output_tokens": 4096,
                         "system_sha256": "fixture-policy-hash",
                     }
@@ -217,7 +220,10 @@ class ReportEvaluationTest(unittest.TestCase):
 
             self.assertEqual(calls, sorted(EVAL.cases_by_id()))
             evaluation = EVAL.read_json(target / "report-evaluation.json")
+            run_metadata = EVAL.read_json(target / "run.json")
             self.assertEqual(evaluation["cases"]["concurrency"]["status"], "生成失败")
+            self.assertEqual(run_metadata["generation_settings"]["thinking_type"], "enabled")
+            self.assertEqual(run_metadata["generation_settings"]["reasoning_effort"], "high")
             self.assertEqual(len(list((target / "outputs").glob("*.md"))), 5)
             self.assertEqual((target / "raw-responses" / "concurrency.txt").read_text(), "not-json output")
             self.assertEqual(EVAL.read_json(target / "diagnostics" / "concurrency.json")["stop_reason"], "end_turn")

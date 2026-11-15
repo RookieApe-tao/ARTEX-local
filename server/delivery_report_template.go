@@ -7,6 +7,11 @@ import (
 	"github.com/wpsec/ARTEX-local/agent"
 )
 
+var deliveryReportForbiddenTerms = []string{
+	"判决项", "归属对照", "人工执行", "测试侧无删除通道", "阴性结果", "如实交付", "零错配",
+	"W07", "属主", "两腿", "腿2", "公开投影", "正向交叉写", "存在性哨兵", "投影",
+}
+
 // Fenced packets and HTML comments can contain Markdown-looking evidence. They
 // must not satisfy report headings or be mistaken for our generated appendix.
 func walkDeliveryMarkdown(report string, visit func(line string, offset int)) bool {
@@ -274,6 +279,7 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 	subsectionIndex, subsectionStart := -1, 0
 	lastSubsection := -1
 	title, cvss := false, false
+	vectorOccurrences := 0
 	var problem string
 	checkSubsection := func(end int) {
 		if subsectionIndex >= 0 && !deliverySectionHasContent(report[subsectionStart:end]) {
@@ -283,6 +289,19 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 	}
 	closed := walkDeliveryMarkdown(report, func(line string, offset int) {
 		if problem != "" {
+			return
+		}
+		for _, term := range deliveryReportForbiddenTerms {
+			if strings.Contains(line, term) {
+				problem = "交付报告包含不符合规范的内部或实验用语：“" + term + "”"
+				return
+			}
+		}
+		if strings.Contains(line, expectedVector) {
+			vectorOccurrences++
+		}
+		if sectionIndex >= 0 && strings.Contains(line, "CVSS 4.0") {
+			problem = "CVSS 信息只在报告头出现，不要在正文重复"
 			return
 		}
 		level, text := deliveryMarkdownHeading(line)
@@ -332,6 +351,14 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 				subsectionIndex, subsectionStart = i, offset+len(line)
 			}
 		}
+		if sectionIndex >= 0 {
+			for _, term := range []string{"低危", "中危", "高危", "低风险", "中等风险", "高风险"} {
+				if strings.Contains(line, term) {
+					problem = "CVSS 等级只写在报告头，定级依据不要重复风险等级"
+					return
+				}
+			}
+		}
 		if sectionIndex < 0 {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmed, "漏洞名称：") || strings.HasPrefix(trimmed, "漏洞名称:") {
@@ -371,6 +398,9 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 	}
 	if problem == "" && (!title || !cvss) {
 		problem = "报告头须包含作为漏洞名称的一级标题及一行“CVSS 4.0：”完整 Base 向量"
+	}
+	if problem == "" && vectorOccurrences != 1 {
+		problem = "CVSS 向量只能在报告头出现一次"
 	}
 	if problem == "" && sectionIndex != len(sections)-1 {
 		problem = "缺少必需章节"

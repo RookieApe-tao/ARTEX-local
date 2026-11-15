@@ -19,7 +19,7 @@ import (
 	"github.com/wpsec/ARTEX-local/tools/report-eval"
 )
 
-const reportEvalMaxTokens = 4096
+const reportEvalMaxTokens = deliveryReportMaxTokens
 
 func reportEvalEnabled() bool {
 	enabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("ARTEX_REPORT_EVAL_ENABLED")))
@@ -50,8 +50,10 @@ func (s *Server) reportEvalInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	systemHash := sha256.Sum256([]byte(deliveryReportCompletionSystem()))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"model": cfg.Model, "provider_source": source, "case_ids": reporteval.IDs(),
-		"max_output_tokens": reportEvalMaxTokens, "system_sha256": hex.EncodeToString(systemHash[:]),
+		"model": cfg.Model, "provider_source": source, "format": cfg.Format,
+		"thinking_type": cfg.ThinkingType, "reasoning_effort": cfg.ReasoningEffort,
+		"case_ids": reporteval.IDs(), "max_output_tokens": reportEvalMaxTokens,
+		"system_sha256": hex.EncodeToString(systemHash[:]),
 	})
 }
 

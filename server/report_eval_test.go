@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"iter"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +40,10 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	t.Setenv("ARTEX_REPORT_EVAL_ENABLED", "false")
 	modelResponseJSON := `{"cvss_vector":"CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N","description":"描述\n### 定级依据\n依据样本中的状态变化。","remediation":"按服务端当前用户校验作业归属。","test_process":"### 发现过程与攻击思路\n按样本步骤核对。\n### 失败尝试与未验证项\n批量编号未验证。","attack_chain":"FENCEtext\n普通用户\n└─ 修改接口\n   └─ 作业状态发生变化\nFENCE","discovery_path":"### Burp 复现\n将样本请求放入 Repeater。\n### 复测标准\n其他用户修改应被拒绝。"}`
 	provider := &reportEvalProvider{result: strings.ReplaceAll(modelResponseJSON, "FENCE", "```")}
-	s := &Server{llmProv: provider, llmOn: true, llmCfg: agent.Config{Model: "fixed-test-model"}, jwtKey: []byte("report-eval-test-signing-key")}
+	s := &Server{llmProv: provider, llmOn: true, llmCfg: agent.Config{
+		Format: llm.FormatOpenAI, Model: "fixed-test-model", APIKey: "must-not-be-exposed",
+		ThinkingType: "enabled", ReasoningEffort: "high",
+	}, jwtKey: []byte("report-eval-test-signing-key")}
 	handler := s.Handler()
 	token, err := signJWT(s.jwtKey)
 	if err != nil {
@@ -71,7 +75,10 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 		t.Fatalf("rejected requests called the model %d times", provider.calls)
 	}
 	info := request(http.MethodGet, "/api/report-eval", "", token)
-	if info.Code != http.StatusOK || !strings.Contains(info.Body.String(), "fixed-test-model") {
+	if info.Code != http.StatusOK || !strings.Contains(info.Body.String(), "fixed-test-model") ||
+		!strings.Contains(info.Body.String(), `"thinking_type":"enabled"`) ||
+		!strings.Contains(info.Body.String(), `"reasoning_effort":"high"`) ||
+		strings.Contains(info.Body.String(), "must-not-be-exposed") {
 		t.Fatalf("metadata response status=%d body=%s", info.Code, info.Body.String())
 	}
 	response := request(http.MethodPost, "/api/report-eval/idor", "", token)
@@ -86,6 +93,9 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	}
 	if provider.request.Thinking != "disabled" {
 		t.Fatalf("evaluation request thinking=%q, want disabled for strict JSON output", provider.request.Thinking)
+	}
+	if provider.request.MaxTokens != deliveryReportMaxTokens {
+		t.Fatalf("evaluation max tokens=%d, want %d", provider.request.MaxTokens, deliveryReportMaxTokens)
 	}
 	prompt := provider.request.Messages[0].Text()
 	for _, forbidden := range []string{"reference_report", "must_preserve", "must_not_claim", `"id":"E`} {
@@ -175,5 +185,84 @@ func TestReportEvalReturnsSafeCompletionFailureCategory(t *testing.T) {
 				t.Fatalf("response leaked provider error detail: %s", response.Body.String())
 			}
 		})
+	}
+}
+
+func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) {
+	prompt := deliveryReportCompletionSystem()
+	for _, required := range []string{
+		"字段内容是章节正文，不要再输出对应的二级章节标题",
+		"风险等级只出现在 CVSS 行",
+		"证据说明”只说明原始材料来源和位置，不重复操作步骤",
+		"原始报文只能证明其中的请求和响应",
+		"失败尝试只能引用实际失败记录",
+		"输入明确标记为 synthetic/离线合成时",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("report completion prompt is missing %q", required)
+		}
+	}
+}
+
+func TestDeliveryReportDraftDisablesConfiguredResponsesReasoning(t *testing.T) {
+	modelDraft := `{"cvss_vector":"CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:L/SC:N/SI:L/SA:N","description":"问题描述。\n### 定级依据\n有可复核证据。","remediation":"在服务端校验资源归属。","test_process":"### 发现过程与攻击思路\n用 Burp Repeater 重放样本请求。\n### 失败尝试与未验证项\n批量编号未验证。","attack_chain":"普通用户\n└─ 修改请求\n   └─ 其他用户数据发生变化","discovery_path":"### Burp 复现\n将请求放入 Repeater。\n### 复测标准\n跨用户请求应被拒绝。"}`
+	receivedCh := make(chan map[string]json.RawMessage, 1)
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Errorf("request path=%q, want /v1/responses", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		var received map[string]json.RawMessage
+		if err := json.Unmarshal(body, &received); err != nil {
+			t.Errorf("decode request body: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		receivedCh <- received
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]any{
+			"status": "completed",
+			"output": []map[string]any{{
+				"type": "message", "role": "assistant",
+				"content": []map[string]any{{"type": "output_text", "text": modelDraft}},
+			}},
+			"usage": map[string]int{"input_tokens": 1200, "output_tokens": 420},
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Errorf("write model response: %v", err)
+		}
+	}))
+	defer providerServer.Close()
+
+	provider, err := (agent.Config{
+		Format: llm.FormatOpenAIResponses, BaseURL: providerServer.URL + "/v1",
+		Model: "qwen3.8-flash", APIKey: "test-provider-key", ReasoningEffort: "xhigh",
+	}).NewProvider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, usage, err := completeDeliveryReportWith(context.Background(), map[string]string{
+		"task_description": "合成评测任务", "request_packet": "GET /item/1 HTTP/1.1",
+	}, 7, provider.Complete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	received := <-receivedCh
+	var reasoning struct {
+		Effort string `json:"effort"`
+	}
+	if err := json.Unmarshal(received["reasoning"], &reasoning); err != nil {
+		t.Fatal(err)
+	}
+	if reasoning.Effort != "none" {
+		t.Fatalf("Responses API reasoning effort=%q, want none", reasoning.Effort)
+	}
+	if draft.Description == "" || usage.OutputTokens != 420 {
+		t.Fatalf("draft=%+v usage=%+v", draft, usage)
 	}
 }

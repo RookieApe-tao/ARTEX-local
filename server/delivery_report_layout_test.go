@@ -30,7 +30,7 @@ func TestDeliveryReportReadableLayoutAndLegacyCompatibility(t *testing.T) {
 		{"wrong order", strings.Replace(report, "## 测试过程", "## 修复建议", 1), false},
 		{"missing evidence", strings.Split(report, "## 证据说明")[0], false},
 		{"empty remediation", strings.Replace(report, "查询时按当前账号校验记录权限。未取得源码，修复后应拒绝访问其他账号记录。", "", 1), false},
-		{"style does not block saving", strings.Replace(report, "已登录用户可读取其他测试账号的记录，敏感数据影响未验证。", "判决项的措辞需要审阅，格式检查不能证明内容质量。", 1), true},
+		{"forbidden lab jargon is rejected", strings.Replace(report, "已登录用户可读取其他测试账号的记录，敏感数据影响未验证。", "判决项的措辞需要审阅，格式检查不能证明内容质量。", 1), false},
 		{"hidden tree cannot satisfy format", strings.Replace(report, "~~~text\n已登录用户", "<!--\n~~~text\n已登录用户", 1) + "\n-->", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

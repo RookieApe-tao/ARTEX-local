@@ -245,6 +245,9 @@ def run_live(args):
         "model": model,
         "provider_source": info.get("provider_source"),
         "generation_settings": {
+            "format": info.get("format"),
+            "thinking_type": info.get("thinking_type"),
+            "reasoning_effort": info.get("reasoning_effort"),
             "temperature": None,
             "seed": None,
             "max_output_tokens": info.get("max_output_tokens"),

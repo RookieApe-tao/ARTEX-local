@@ -3,7 +3,7 @@ package agent
 // The order is shared with save validation so generated and accepted reports agree.
 const DeliveryReportSectionOrder = "描述、修复、测试过程、攻击链路、证据说明"
 
-const DeliveryReportSaveGuidance = "交付报告须包含一个漏洞名称一级标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：" + DeliveryReportSectionOrder + "。须包含三级标题“定级依据”“发现过程与攻击思路”“失败尝试与未验证项”“Burp 复现”“复测标准”。材料不足时在对应位置说明未验证或缺少什么。正文用具体操作、结果和修复办法说明问题。绑定的原始材料由 ARTEX 完整附加，不能改写或重复粘贴。HTTP 报告须提供 Burp Repeater 复现说明；实际未用 Burp 时要标明复测未验证。攻击链用 text 代码块展示有证据支持的步骤。"
+const DeliveryReportSaveGuidance = "交付报告须包含一个漏洞名称一级标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：" + DeliveryReportSectionOrder + "。须包含三级标题“定级依据”“发现过程与攻击思路”“失败尝试与未验证项”“Burp 复现”“复测标准”。材料不足时在对应位置说明未验证或缺少什么。正文用具体操作、结果和修复办法说明问题。绑定的原始材料由 ARTEX 完整附加，不能改写或重复粘贴。HTTP 报告须提供 Burp Repeater 复现说明；实际未用 Burp 时要标明复测未验证。攻击链用 text 代码块展示有证据支持的步骤。CVSS 信息与风险等级只在报告头出现一次；不得使用“判决项”“阴性结果”“属主”“W07”等内部或实验记录词。"
 
 // Injected for every agent that has permission to save reports, including
 // agents with user-edited prompts. The tool schema and report write flow stay stable.
@@ -21,7 +21,15 @@ const DeliveryReportStyleGuidance = `
 - 面向开发和业务读者，用自然、简短的中文写清实际情况。先说明问题，再给复现与修复。避免模型自述、模板说明、内部代号和重复解释。
 - 按用途引用材料，保持关键条件、参数、结果和未验证范围。删掉重复叙述时，不删复现所需信息。
 - 标题、攻击链与正文使用一致的术语。只写证据支持的链路，不补造页面、前端动作、服务端行为、代码位置或影响。
-- 原始请求、响应、命令和终端输出由 ARTEX 按原文附加；不要为改变措辞而遮盖、截断、替换或改写原始材料。`
+- 原始请求、响应、命令和终端输出由 ARTEX 按原文附加；不要为改变措辞而遮盖、截断、替换或改写原始材料。
+- 每个已完成的测试动作、工具、参数、时间和结果，都必须能在本次执行记录中找到。原始报文只能证明其中的请求和响应，不能证明由 Burp、脚本、并发屏障或某个页面发起。
+- 失败尝试只能引用实际失败记录；没有记录时明确写“未取得失败尝试记录”，不要自行增加 UNION、SQL 注入、超时或权限测试。
+- 按输入给出的漏洞名称描述问题，不要改套相近漏洞术语；只写已观察到的影响，不把可能的后续利用写成已实现能力。
+- CVSS 等级只在报告头出现，定级依据解释向量对应的权限、条件和已观察影响，不再给出与分数冲突的高、中、低危描述。
+- 测试步骤中的 Burp Repeater 说明只写一次；证据说明只交代证据来源和位置，并引用测试步骤，不重复操作流程。
+- 输入明确标记为 synthetic/离线合成时，说明这是合成样本且未对真实目标执行；不要把样本报文写成现场实测。
+- CVSS 向量、分数和等级只写在报告头。正文的定级依据只解释权限、条件和已观察影响，不重复向量、分数或危害等级。
+- 禁止使用实验台账和内部标签词：判决项、归属对照、人工执行、测试侧无删除通道、阴性结果、如实交付、零错配、W07、属主、两腿、腿2、公开投影、正向交叉写、存在性哨兵、投影。`
 
 const DeliveryReportWritingRules = DeliveryReportRuntimeGuidance + DeliveryReportStyleGuidance + `
 

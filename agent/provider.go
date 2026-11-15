@@ -10,6 +10,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -20,12 +21,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wpsec/ARTEX-local/llmrec"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/compaction"
 	"github.com/Autumn-27/norma/llm"
 	acperm "github.com/Autumn-27/norma/permission"
 	"github.com/Autumn-27/norma/transcript"
+	"github.com/wpsec/ARTEX-local/llmrec"
 )
 
 // Config describes the LLM backend resolved from the environment.
@@ -283,6 +284,14 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	return llm.NewProvider(lc)
 }
 
+type deliveryReportReasoningDisabledKey struct{}
+
+// WithDeliveryReportReasoningDisabled scopes a no-reasoning request to the
+// structured delivery-report draft; ordinary Agent requests keep their profile settings.
+func WithDeliveryReportReasoningDisabled(ctx context.Context) context.Context {
+	return context.WithValue(ctx, deliveryReportReasoningDisabledKey{}, true)
+}
+
 // IsQuotaExhaustedMessage deliberately recognizes only explicit balance,
 // billing, credit, or quota-exhaustion signals. Generic 429/rate-limit text,
 // authentication failures, network errors, and server failures are excluded.
@@ -336,6 +345,11 @@ type quotaAwareTransport struct {
 }
 
 func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var err error
+	req, err = applyDeliveryReportReasoningOverride(req)
+	if err != nil {
+		return nil, err
+	}
 	// Custom session-id header: name is user-configured, value is THIS run's
 	// session id (norma stashes it on the context via transcript.WithSessionID).
 	// Stable across a session's turns and distinct across sessions — exactly what
@@ -376,6 +390,56 @@ func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error
 		resp.Status = "402 Payment Required"
 	}
 	return resp, nil
+}
+
+func applyDeliveryReportReasoningOverride(req *http.Request) (*http.Request, error) {
+	disabled, _ := req.Context().Value(deliveryReportReasoningDisabledKey{}).(bool)
+	if !disabled || req.Method != http.MethodPost || req.URL == nil || req.GetBody == nil {
+		return req, nil
+	}
+	path := strings.TrimRight(req.URL.Path, "/")
+	responsesAPI := strings.HasSuffix(path, "/responses")
+	chatAPI := strings.HasSuffix(path, "/chat/completions")
+	if !responsesAPI && !chatAPI {
+		return req, nil
+	}
+
+	body, err := req.GetBody()
+	if err != nil {
+		return nil, fmt.Errorf("delivery report request body unavailable: %w", err)
+	}
+	raw, err := io.ReadAll(body)
+	closeErr := body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("read delivery report request body: %w", err)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close delivery report request body: %w", closeErr)
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("decode delivery report request body: %w", err)
+	}
+	if responsesAPI {
+		payload["reasoning"] = json.RawMessage(`{"effort":"none"}`)
+	} else {
+		payload["reasoning_effort"] = json.RawMessage(`"none"`)
+		delete(payload, "thinking")
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode delivery report request body: %w", err)
+	}
+
+	updated := req.Clone(req.Context())
+	updated.Header = req.Header.Clone()
+	updated.Header.Del("Content-Length")
+	updated.Body = io.NopCloser(bytes.NewReader(encoded))
+	updated.ContentLength = int64(len(encoded))
+	updated.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(encoded)), nil
+	}
+	return updated, nil
 }
 
 // requestBodySnapshot copies an outgoing request body without consuming it.
