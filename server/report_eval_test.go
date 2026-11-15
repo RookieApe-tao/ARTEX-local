@@ -84,6 +84,9 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if len(provider.request.Tools) != 0 {
 		t.Fatalf("evaluation request exposed %d tools", len(provider.request.Tools))
 	}
+	if provider.request.Thinking != "disabled" {
+		t.Fatalf("evaluation request thinking=%q, want disabled for strict JSON output", provider.request.Thinking)
+	}
 	prompt := provider.request.Messages[0].Text()
 	for _, forbidden := range []string{"reference_report", "must_preserve", "must_not_claim", `"id":"E`} {
 		if strings.Contains(prompt, forbidden) {

@@ -245,7 +245,7 @@ func completeDeliveryReportWith(
 		return deliveryReportDraft{}, llm.Usage{}, err
 	}
 	message, _, usage, err := complete(ctx, llm.CompletionRequest{
-		System: []string{deliveryReportCompletionSystem()}, Messages: []llm.Message{llm.UserText(string(raw))}, MaxTokens: 4096,
+		System: []string{deliveryReportCompletionSystem()}, Messages: []llm.Message{llm.UserText(string(raw))}, MaxTokens: 4096, Thinking: "disabled",
 	})
 	if err != nil {
 		return deliveryReportDraft{}, usage, err
