@@ -428,6 +428,8 @@ const previousFindingReportToolDescriptionTemplateV2 = "为已登记的漏洞一
 
 const previousFindingReportToolDescriptionTemplateV3 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。交付报告头只写一个漏洞名称和一行 CVSS 4.0 信息。二级标题必须逐字依次写为：漏洞描述、测试过程、攻击链路、修复建议、证据说明；不能缩写或换成近义标题。正文短句，优先写复现和修复；完整绑定报文由 ARTEX 自动附加，不要重抄。HTTP 测试过程写 Burp Repeater 的请求、账号会话、修改项、顺序和判据；并发测试先发基线查询，再将相同请求放入标签组选择 Send group in parallel，最后发回读查询；不编造线程控件。失败尝试和未验证边界简短说明，不得补造。保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
+const previousFindingReportToolDescriptionTemplateV4 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。交付报告须包含一个漏洞名称一级标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：描述、修复、测试过程、攻击链路、证据说明。须包含三级标题“定级依据”“发现过程与攻击思路”“失败尝试与未验证项”“Burp 复现”“复测标准”。材料不足时在对应位置说明未验证或缺少什么。正文用具体操作、结果和修复办法说明问题。绑定的原始材料由 ARTEX 完整附加，不能改写或重复粘贴。HTTP 报告须提供 Burp Repeater 复现说明；实际未用 Burp 时要标明复测未验证。攻击链用 text 代码块展示有证据支持的步骤。CVSS 信息与风险等级只在报告头出现一次；不得使用“判决项”“阴性结果”“属主”“W07”等内部或实验记录词。保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
+
 const findingReportToolDescription = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + agent.DeliveryReportSaveGuidance + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
 // finding_id remains the finding node ID used by native report callers; writes
@@ -714,7 +716,8 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 		"8b3000d01b7f8bdee0a4b1f4fcee3beb8350744d10144c5c2669090acffd83ed", // 补回攻击链章节的默认值
 		"8f8e5a14828823f4b3ca6f255ed0a8775787bb31d08c5cb2c5576222ad2a81bd", // 旧版固定五节模板
 		"169a228581af77e71037a37fb350013c6e5d9d7e3ffa80fd5ff1d2cbec2618c4", // 精简标题与树形攻击链默认值
-		"66b2c31047b3b2ad974673d5cbf4462e4be4f0274b455876b5f51a5131bd151d": // 已知旧版改写标题与限制规则
+		"66b2c31047b3b2ad974673d5cbf4462e4be4f0274b455876b5f51a5131bd151d", // 已知旧版改写标题与限制规则
+		"3f39e940b17ac4ac44ce9149863c0714d9ea7c84c3f3fa7c0fd65034f07629de": // 上一版内置 Reporter 默认提示词
 		return true
 	default:
 		return false
@@ -722,7 +725,7 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 }
 
 func (s *Server) upgradeReporterDeliveryTemplate() {
-	const flag = "reporter_prompt_delivery_template_v4"
+	const flag = "reporter_prompt_delivery_template_v5"
 	value, _, err := s.m.pg.GetSetting(flag)
 	if err != nil {
 		log.Printf("[reporter] 读取固定模板迁移标记失败: %v", err)
@@ -734,7 +737,7 @@ func (s *Server) upgradeReporterDeliveryTemplate() {
 	// Only refresh the known stock description; edited schema and bindings stay
 	// authoritative, while runtime guidance still explains the save contract.
 	if _, err := s.m.pg.Exec(`UPDATE tools SET description=$1,updated_at=now()
-WHERE key='update_finding_report' AND system AND description IN ($2,$3,$4,$5)`, findingReportToolDescription, previousFindingReportToolDescription, previousFindingReportToolDescriptionTemplateV1, previousFindingReportToolDescriptionTemplateV2, previousFindingReportToolDescriptionTemplateV3); err != nil {
+WHERE key='update_finding_report' AND system AND description IN ($2,$3,$4,$5,$6)`, findingReportToolDescription, previousFindingReportToolDescription, previousFindingReportToolDescriptionTemplateV1, previousFindingReportToolDescriptionTemplateV2, previousFindingReportToolDescriptionTemplateV3, previousFindingReportToolDescriptionTemplateV4); err != nil {
 		log.Printf("[reporter] 更新固定模板工具说明失败: %v", err)
 		return
 	}

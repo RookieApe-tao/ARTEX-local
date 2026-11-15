@@ -106,6 +106,11 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if !strings.Contains(prompt, "GET /api/jobs/job-a HTTP/1.1") || !strings.Contains(prompt, "user-b") {
 		t.Fatal("model input omitted the fixed sample evidence")
 	}
+	for _, required := range []string{`"synthetic":"true"`, "离线合成报文与记录", "攻击者已登录，知道 job-a 编号", "不带身份提交修改：HTTP 401", "没有取得正式文件正文"} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("model input omitted authoritative sample context %q", required)
+		}
+	}
 	if !strings.Contains(prompt, "不对应真实系统") || !strings.Contains(prompt, "不访问网络") {
 		t.Fatal("model input must mark the cases as synthetic and prohibit network activity")
 	}
@@ -136,6 +141,12 @@ func TestReportEvalPromptInputLabelsSyntheticMaterials(t *testing.T) {
 	}
 	if input["request_packet"] == "" || input["response_packet"] == "" {
 		t.Fatal("incomplete HTTP evidence must preserve both the request and the partial response")
+	}
+	if input["cvss_vector_hint"] != sample.Facts.CVSSVector {
+		t.Fatalf("CVSS hint=%q, want %q", input["cvss_vector_hint"], sample.Facts.CVSSVector)
+	}
+	if input["test_time_hint"] != sample.TestTime {
+		t.Fatalf("test time hint=%q, want %q", input["test_time_hint"], sample.TestTime)
 	}
 }
 
@@ -191,16 +202,71 @@ func TestReportEvalReturnsSafeCompletionFailureCategory(t *testing.T) {
 func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) {
 	prompt := deliveryReportCompletionSystem()
 	for _, required := range []string{
-		"字段内容是章节正文，不要再输出对应的二级章节标题",
-		"风险等级只出现在 CVSS 行",
-		"证据说明”只说明原始材料来源和位置，不重复操作步骤",
-		"原始报文只能证明其中的请求和响应",
-		"失败尝试只能引用实际失败记录",
-		"输入明确标记为 synthetic/离线合成时",
+		"各字段只写章节正文，不重复二级标题",
+		"定级依据简要说明权限、条件和已观察影响",
+		"Burp 未实际使用时，写“Burp 复测未验证”",
+		"不要编造 Repeater 按钮、选项或并发能力",
+		"输入有 cvss_vector_hint 时照抄该值",
+		"有 test_time_hint 时在测试过程中写一次",
+		"输入有 recorded_failures 时须逐项写入失败尝试",
+		"若输入标明 synthetic=true、evidence_origin 或测试未在真实目标执行",
+		"合成样本观察",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("report completion prompt is missing %q", required)
 		}
+	}
+}
+
+func TestDeliveryReportCompletionUsesProvidedCVSSVectorHint(t *testing.T) {
+	sample, material, err := reporteval.Load("incomplete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := reportEvalPromptInput(sample, material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelDraft := `{"cvss_vector":"not-a-cvss-vector","description":"线索待核实。\n### 定级依据\n当前证据不足。","remediation":"先补齐响应正文。","test_process":"### 发现过程与攻击思路\n复核现有请求。\n### 失败尝试与未验证项\n文件内容未取得。","attack_chain":"用户 B 请求文件\n└─ 仅留存 HTTP 200 响应头","discovery_path":"### Burp 复现\nBurp 复测未验证。\n### 复测标准\n取得完整响应并比对文件。"}`
+	draft, _, err := completeDeliveryReportWith(context.Background(), input, 0, func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock(modelDraft)}}, "end_turn", llm.Usage{}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.CVSSVector != sample.Facts.CVSSVector {
+		t.Fatalf("CVSS vector=%q, want trusted hint %q", draft.CVSSVector, sample.Facts.CVSSVector)
+	}
+}
+
+func TestStripDeliveryDraftSectionHeading(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		section string
+		want    string
+	}{
+		{"leading duplicate", "## 描述\n\n正文。", "描述", "正文。"},
+		{"repeated leading duplicate", "## 描述\n## 描述\n正文。", "描述", "正文。"},
+		{"preserve different heading", "### 定级依据\n正文。", "描述", "### 定级依据\n正文。"},
+		{"preserve inline occurrence", "正文中引用 ## 描述。", "描述", "正文中引用 ## 描述。"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stripDeliveryDraftSectionHeading(tc.content, tc.section); got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEnsureDeliveryAttackChainTextFence(t *testing.T) {
+	plain := "普通用户登录\n└─ GET /api/me\n   └─ 返回用户信息"
+	if got, want := ensureDeliveryAttackChainTextFence(plain), "```text\n"+plain+"\n```"; got != want {
+		t.Fatalf("plain chain=%q, want %q", got, want)
+	}
+	fenced := "```text\n" + plain + "\n```"
+	if got := ensureDeliveryAttackChainTextFence(fenced); got != fenced {
+		t.Fatalf("already fenced chain changed: %q", got)
 	}
 }
 

@@ -131,18 +131,15 @@ func TestReportRuntimeGuidanceFollowsFinalPermissions(t *testing.T) {
 
 func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 	for _, required := range []string{
-		"详细报告保留逐项工具参数、准确时间、失败记录、哈希和证据索引",
-		"交付正文只保留复现必需的账号或会话、关键参数、操作顺序和判据",
-		"工具版本、完整命令、逐次结果、精确时间等留在详细报告或原始材料中",
-		"测试日期在测试过程中集中写一次，使用北京时间",
-		"原始报文只能证明其中的请求和响应，不能证明由 Burp、脚本、并发屏障或某个页面发起",
-		"失败尝试只能引用实际失败记录",
-		"不要改套相近漏洞术语",
-		"CVSS 等级只在报告头出现",
-		"测试步骤中的 Burp Repeater 说明只写一次",
-		"输入明确标记为 synthetic/离线合成时，说明这是合成样本且未对真实目标执行",
-		"CVSS 向量、分数和等级只写在报告头",
-		"禁止使用实验台账和内部标签词",
+		"详细报告保留完整测试台账",
+		"交付报告只写开发和业务人员理解问题、复现和修复所需的内容",
+		"请求与响应只能证明其中记录的内容",
+		"明确的未验证项优先于推测",
+		"没有检查源码或配置时，不猜代码位置、版本或实现方式",
+		"CVSS 向量、分数和等级只放在报告头",
+		"失败尝试只写已执行并有记录的操作",
+		"不要编造 Repeater 按钮、选项或并发能力",
+		"文件系统用语写“文件所有者”，不写“属主”",
 	} {
 		if !strings.Contains(DeliveryReportWritingRules, required) {
 			t.Fatalf("delivery report guidance is missing %q", required)

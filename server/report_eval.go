@@ -150,9 +150,30 @@ func reportEvalPromptInput(sample reporteval.Case, material []byte) (map[string]
 	for _, observation := range sample.Facts.Observations {
 		observations = append(observations, "- "+observation)
 	}
+	var failures []string
+	for _, item := range sample.Evidence {
+		if status := evidenceHTTPStatus(item.Response); status >= http.StatusBadRequest {
+			failures = append(failures, fmt.Sprintf("%s：HTTP %d", item.Purpose, status))
+			continue
+		}
+		if item.ExitCode != 0 {
+			failure := fmt.Sprintf("%s：命令退出码 %d", item.Purpose, item.ExitCode)
+			if strings.TrimSpace(item.Stderr) != "" {
+				failure += "，" + strings.TrimSpace(item.Stderr)
+			}
+			failures = append(failures, failure)
+		}
+	}
 	return map[string]string{
 		"task_description":                  "离线合成交付报告评测；不对应真实系统或真实测试。",
 		"task_goal":                         "仅根据固定样本写报告，不执行命令、不调用工具、不访问网络。",
+		"synthetic":                         strconv.FormatBool(sample.Synthetic),
+		"evidence_origin":                   "离线合成报文与记录；没有访问真实目标或执行真实测试。",
+		"test_conditions":                   strings.Join(sample.Facts.Conditions, "\n"),
+		"recorded_failures":                 strings.Join(failures, "\n"),
+		"known_limitations":                 strings.Join(sample.Facts.Limitations, "\n"),
+		"cvss_vector_hint":                  sample.Facts.CVSSVector,
+		"test_time_hint":                    sample.TestTime,
 		"finding_name":                      sample.Name,
 		"vulnerability_class":               "",
 		"severity":                          "",
@@ -163,6 +184,19 @@ func reportEvalPromptInput(sample reporteval.Case, material []byte) (map[string]
 		"request_packet":                    reportEvalPackets(sample.Evidence, true),
 		"response_packet":                   reportEvalPackets(sample.Evidence, false),
 	}, nil
+}
+
+func evidenceHTTPStatus(response string) int {
+	line, _, _ := strings.Cut(strings.TrimSpace(response), "\n")
+	fields := strings.Fields(line)
+	if len(fields) < 2 || !strings.HasPrefix(fields[0], "HTTP/") {
+		return 0
+	}
+	status, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0
+	}
+	return status
 }
 
 func materialEvidence(material []byte) (json.RawMessage, error) {
