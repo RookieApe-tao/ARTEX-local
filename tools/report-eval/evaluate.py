@@ -172,9 +172,12 @@ def api_json(base_url, path, method="GET", payload=None, token=None):
         if not isinstance(error_body, dict):
             error_body = {}
         message = error_body.get("error")
-        if isinstance(message, str) and message:
-            raise ValueError(f"ARTEX 本地接口返回 HTTP {exc.code}：{message}") from None
-        raise ValueError(f"ARTEX 本地接口返回 HTTP {exc.code}") from None
+        raw_output = error_body.get("raw_output")
+        raise ReportEvalHTTPError(
+            exc.code,
+            message if isinstance(message, str) else "",
+            raw_output if isinstance(raw_output, str) else "",
+        ) from None
     except urllib.error.URLError as exc:
         raise ValueError("无法连接本机 ARTEX；确认容器正在运行且端口正确") from exc
 
@@ -182,6 +185,16 @@ def api_json(base_url, path, method="GET", payload=None, token=None):
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, new_url):
         return None
+
+
+class ReportEvalHTTPError(ValueError):
+    def __init__(self, status, message, raw_output=""):
+        if message:
+            message = f"ARTEX 本地接口返回 HTTP {status}：{message}"
+        else:
+            message = f"ARTEX 本地接口返回 HTTP {status}"
+        super().__init__(message)
+        self.raw_output = raw_output
 
 
 def run_live(args):
@@ -204,7 +217,7 @@ def run_live(args):
         raise ValueError("运行中的固定样本与本地评测材料不一致")
     model = info.get("model") or "未返回模型标识"
     target.mkdir(parents=True)
-    for folder in ("inputs", "drafts", "outputs", "reviews"):
+    for folder in ("inputs", "drafts", "outputs", "raw-responses", "reviews"):
         (target / folder).mkdir()
     corpus = {}
     for case in local_cases:
@@ -275,6 +288,8 @@ def run_live(args):
                 print(f"{cid} 完成：{usage.get('input_tokens', 0)} 输入 token，{usage.get('output_tokens', 0)} 输出 token，{result.get('duration_ms', 0) / 1000:.1f} 秒")
             except ValueError as exc:
                 meta["failures"][cid] = str(exc)
+                if isinstance(exc, ReportEvalHTTPError) and exc.raw_output:
+                    (target / "raw-responses" / f"{cid}.txt").write_text(exc.raw_output, encoding="utf-8")
                 write_json(target / "run.json", meta)
                 print(f"{cid} 失败：{exc}")
     finally:

@@ -133,11 +133,12 @@ func TestReportEvalReturnsSafeCompletionFailureCategory(t *testing.T) {
 		result      string
 		providerErr error
 		wantMessage string
+		wantRaw     string
 		mustHide    string
 	}{
 		{name: "provider error", providerErr: errors.New("upstream token=secret-value"), wantMessage: "报告模型调用失败", mustHide: "secret-value"},
-		{name: "invalid JSON", result: "not JSON", wantMessage: "模型未返回可解析的报告字段"},
-		{name: "missing fields", result: `{}`, wantMessage: "模型报告字段不完整"},
+		{name: "invalid JSON", result: "not JSON", wantMessage: "模型未返回可解析的报告字段", wantRaw: "not JSON"},
+		{name: "missing fields", result: `{}`, wantMessage: "模型报告字段不完整", wantRaw: `{}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -156,6 +157,9 @@ func TestReportEvalReturnsSafeCompletionFailureCategory(t *testing.T) {
 			}
 			if !strings.Contains(response.Body.String(), tt.wantMessage) {
 				t.Fatalf("body=%s, want safe category %q", response.Body.String(), tt.wantMessage)
+			}
+			if tt.wantRaw != "" && !strings.Contains(response.Body.String(), tt.wantRaw) {
+				t.Fatalf("body=%s, want fixed-sample model output %q", response.Body.String(), tt.wantRaw)
 			}
 			if tt.mustHide != "" && strings.Contains(response.Body.String(), tt.mustHide) {
 				t.Fatalf("response leaked provider error detail: %s", response.Body.String())

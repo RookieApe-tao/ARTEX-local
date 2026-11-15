@@ -32,6 +32,15 @@ var (
 	errDeliveryReportMissingBody = errors.New("报告缺少必需内容")
 )
 
+type deliveryReportOutputError struct {
+	cause error
+	raw   string
+}
+
+func (e *deliveryReportOutputError) Error() string { return e.cause.Error() }
+
+func (e *deliveryReportOutputError) Unwrap() error { return e.cause }
+
 type deliveryReportAccess struct {
 	task      *Task
 	taskID    int64
@@ -247,7 +256,7 @@ func completeDeliveryReportWith(
 	text = strings.TrimSuffix(strings.TrimSpace(text), "```")
 	var draft deliveryReportDraft
 	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &draft); err != nil {
-		return deliveryReportDraft{}, usage, errDeliveryReportInvalidJSON
+		return deliveryReportDraft{}, usage, &deliveryReportOutputError{cause: errDeliveryReportInvalidJSON, raw: text}
 	}
 	draft.Description = strings.TrimSpace(draft.Description)
 	draft.Remediation = strings.TrimSpace(draft.Remediation)
@@ -256,7 +265,7 @@ func completeDeliveryReportWith(
 	draft.DiscoveryPath = strings.TrimSpace(draft.DiscoveryPath)
 	if draft.Description == "" || draft.Remediation == "" || draft.TestProcess == "" ||
 		draft.AttackChain == "" || draft.DiscoveryPath == "" {
-		return deliveryReportDraft{}, usage, errDeliveryReportMissingBody
+		return deliveryReportDraft{}, usage, &deliveryReportOutputError{cause: errDeliveryReportMissingBody, raw: text}
 	}
 	draft.EvidenceVersion = evidenceVersion
 	return draft, usage, nil

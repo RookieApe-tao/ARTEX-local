@@ -102,6 +102,11 @@ func (s *Server) runReportEvalCase(w http.ResponseWriter, r *http.Request) {
 			message = "模型请求超时"
 			status = http.StatusGatewayTimeout
 		}
+		var outputErr *deliveryReportOutputError
+		if errors.As(err, &outputErr) {
+			writeJSON(w, status, map[string]string{"error": message, "raw_output": outputErr.raw})
+			return
+		}
 		writeErr(w, status, message)
 		return
 	}

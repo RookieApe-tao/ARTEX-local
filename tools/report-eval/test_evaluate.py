@@ -180,7 +180,7 @@ class ReportEvaluationTest(unittest.TestCase):
                 case_id = path.rsplit("/", 1)[-1]
                 calls.append(case_id)
                 if case_id == "concurrency":
-                    raise ValueError("ARTEX 本地接口返回 HTTP 502：模型请求失败")
+                    raise EVAL.ReportEvalHTTPError(502, "模型未返回可解析的报告字段", "not-json output")
                 case = EVAL.cases_by_id()[case_id]
                 return {
                     "draft": {
@@ -209,6 +209,7 @@ class ReportEvaluationTest(unittest.TestCase):
             evaluation = EVAL.read_json(target / "report-evaluation.json")
             self.assertEqual(evaluation["cases"]["concurrency"]["status"], "生成失败")
             self.assertEqual(len(list((target / "outputs").glob("*.md"))), 5)
+            self.assertEqual((target / "raw-responses" / "concurrency.txt").read_text(), "not-json output")
             saved_text = "\n".join(path.read_text(encoding="utf-8") for path in target.rglob("*") if path.is_file())
             self.assertNotIn("secret-test-token", saved_text)
             self.assertNotIn("test-password", saved_text)
