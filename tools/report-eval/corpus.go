@@ -29,6 +29,7 @@ type Facts struct {
 	Observations []string `json:"observations"`
 	Conditions   []string `json:"conditions"`
 	Limitations  []string `json:"limitations"`
+	TestTool     string   `json:"test_tool,omitempty"`
 	CVSSVector   string   `json:"cvss_vector"`
 }
 

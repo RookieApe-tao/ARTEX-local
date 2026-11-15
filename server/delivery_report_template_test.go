@@ -21,24 +21,26 @@ func TestValidateDeliveryReportTemplate(t *testing.T) {
 		{"fixed template", valid, true},
 		{"CRLF", strings.ReplaceAll(valid, "\n", "\r\n"), true},
 		{"packet contains headings", valid + "\n\n" + markdownPacketBlock("HTTP/1.1 200 OK\n\n## 描述\n### Burp 复现"), true},
-		{"tree contains headings", strings.Replace(valid, "请求结果和业务影响未验证", "请求结果和业务影响未验证\n## 修复\n", 1), true},
+		{"tree contains headings", strings.Replace(valid, "请求结果和业务影响未验证", "请求结果和业务影响未验证\n## 修复建议\n", 1), true},
 		{"no title", strings.Replace(valid, "# 测试系统-模块 /test 测试缺陷：测试结果", "测试报告", 1), false},
 		{"duplicate finding name", strings.Replace(valid, "CVSS 4.0：", "漏洞名称：测试系统-模块 /test 测试缺陷\nCVSS 4.0：", 1), false},
 		{"invalid header vector", strings.Replace(valid, vector, "CVSS:4.0/AV:N", 1), false},
 		{"attack chain without tree", strings.Replace(valid, "└─ 请求结果和业务影响未验证", "请求结果和业务影响未验证", 1), false},
 		{"packet cannot supply attack chain", strings.Replace(valid, "## 攻击链路", "```http\n## 攻击链路\n```", 1), false},
 		{"comment cannot supply attack chain", strings.Replace(valid, "## 攻击链路", "<!--\n## 攻击链路\n-->", 1), false},
-		{"wrong section order", strings.Replace(valid, "## 修复", "## 测试过程", 1), false},
+		{"wrong section order", strings.Replace(valid, "## 修复建议", "## 测试过程", 1), false},
 		{"duplicate section", valid + "\n\n## 描述\n重复章节。", false},
-		{"empty remediation", strings.Replace(valid, "配置和源码位置未验证。", " \t\n", 1), false},
-		{"missing failure subsection", strings.Replace(valid, "### 失败尝试与未验证项", "### 其他记录", 1), false},
-		{"packet cannot supply Burp subsection", strings.Replace(valid, "### Burp 复现", "~~~http\n### Burp 复现\n~~~", 1), false},
-		{"indented code cannot supply subsection", strings.Replace(valid, "### Burp 复现", "\t### Burp 复现", 1), false},
-		{"empty retest subsection", strings.Replace(valid, "业务判据未验证。", "", 1), false},
-		{"comment-only subsection", strings.Replace(valid, "业务判据未验证。", "<!-- TODO -->", 1), false},
-		{"repeated CVSS in body", strings.Replace(valid, "业务判据未验证。", "CVSS 4.0："+vector, 1), false},
+		{"empty remediation", strings.Replace(valid, "现有材料不足以定位具体实现，需结合源码确认修复位置。", " \t\n", 1), false},
+		{"nested headings rejected", strings.Replace(valid, "## 测试过程", "### 发现过程与攻击思路\n\n## 测试过程", 1), false},
+		{"missing test time", strings.Replace(valid, "测试时间：未记录。", "", 1), false},
+		{"test time timezone missing", strings.Replace(valid, "测试时间：未记录。", "测试时间：2026-11-01 10:00:00。", 1), false},
+		{"missing Burp or non-HTTP note", strings.ReplaceAll(strings.ReplaceAll(valid, "Repeater", "HTTP 工具"), "Burp", "HTTP"), false},
+		{"non-HTTP Burp note", strings.Replace(valid, "Burp Repeater 复测未验证；取得授权请求后，将报文放入 Repeater 发送并按响应判据核对。", "Burp 不适用：本地命令验证。", 1), true},
+		{"repeated CVSS in body", strings.Replace(valid, "来源为本地合成测试记录，未采集原始请求和响应。", "CVSS 4.0："+vector, 1), false},
 		{"risk rationale in body", strings.Replace(valid, "重复请求的实际影响未验证。", "当前材料支持低危判断，重复请求的其他影响未验证。", 1), true},
-		{"domain term in body", strings.Replace(valid, "重复请求的实际影响未验证。", "响应中的属主字段与测试账号一致，其他影响未验证。", 1), true},
+		{"SQL keyword filtering is not a remediation", strings.Replace(strings.Replace(valid, "重复请求的实际影响未验证。", "SQL 注入结论待核实。", 1), "现有材料不足以定位具体实现，需结合源码确认修复位置。", "对 name 字段进行输入校验与过滤。", 1), false},
+		{"unsupported bitwise extraction wording", strings.Replace(valid, "重复请求的实际影响未验证。", "真假响应差异只能说明响应不同，未取得数据。不要写逐位探测。", 1), false},
+		{"domain term in body", strings.Replace(valid, "重复请求的实际影响未验证。", "响应中的文件所有者与测试账号不一致，其他影响未验证。", 1), true},
 		{"inline XSS payload", strings.Replace(valid, "重复请求的实际影响未验证。", "测试参数包含 `<!--`，实际影响未验证。", 1), true},
 		{"multiple-backtick payload", strings.Replace(valid, "重复请求的实际影响未验证。", "测试参数包含 ``x`<!--``，实际影响未验证。", 1), true},
 		{"fence info contains comment syntax", strings.Replace(valid, "重复请求的实际影响未验证。", "```text <!--\n实际影响未验证。\n```", 1), true},
@@ -93,6 +95,13 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptNeedsTemplateUpgrade(string(latestPrevious)) {
 		t.Fatal("previous stock tree-template default would not receive the concise delivery rules")
 	}
+	previousCurrent := strings.Replace(agent.ReporterDefaultPrompt,
+		"账号、身份、权限和会话形式只能使用材料中明确记录的内容；不要自行增加 user-a/user-b、Cookie、Token 或字段名称。输入有明确的 test_tool_hint 时照录为执行工具；没有时写“执行工具：未记录”。\n", "", 1)
+	previousCurrent = strings.Replace(previousCurrent,
+		"测试标记（包括 X-Eval-Actor）不是身份凭证。不要在报告中抄写标记名或建议替换标记，也不要猜 Cookie、Token 或认证头格式；身份未验证时写未验证。真实复测应让获授权账号正常登录，再捕获真实请求，不要修改合成标记来模拟身份。\n", "", 1)
+	if !reporterPromptNeedsTemplateUpgrade(previousCurrent) {
+		t.Fatal("previous fixed-template default would not receive explicit evidence and identity rules")
+	}
 	for _, customized := range []string{string(previous) + "\n用户自定义要求。", string(latestPrevious) + "\n用户自定义要求。", "自定义报告模板", agent.ReporterDefaultPrompt} {
 		if reporterPromptNeedsTemplateUpgrade(customized) {
 			t.Fatal("custom or already current prompt would be replaced")
@@ -101,7 +110,7 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 }
 
 func TestReporterTriggerUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T) {
-	for _, previous := range []string{reporterToolCallMessageV1, reporterToolCallMessageV2, reporterToolCallMessageV2Legacy, reporterToolCallMessageV3, reporterToolCallMessageV4, reporterToolCallMessageV5, reporterToolCallMessageV6, reporterToolCallMessageV7} {
+	for _, previous := range []string{reporterToolCallMessageV1, reporterToolCallMessageV2, reporterToolCallMessageV2Legacy, reporterToolCallMessageV3, reporterToolCallMessageV4, reporterToolCallMessageV5, reporterToolCallMessageV6, reporterToolCallMessageV7, reporterToolCallMessageV8} {
 		if !reporterTriggerMessageNeedsUpgrade(previous) {
 			t.Fatal("previous stock trigger would retain superseded delivery instructions")
 		}
@@ -109,6 +118,23 @@ func TestReporterTriggerUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T)
 	for _, preserved := range []string{reporterToolCallMessage, reporterToolCallMessageV6 + "\n用户自定义要求。", "自定义触发内容"} {
 		if reporterTriggerMessageNeedsUpgrade(preserved) {
 			t.Fatal("custom or already current trigger would be replaced")
+		}
+	}
+}
+
+func TestReporterToolDescriptionUpgradeRecognizesPreviousVersions(t *testing.T) {
+	previous := previousFindingReportToolDescriptions()
+	if len(previous) != 8 {
+		t.Fatalf("expected eight historical tool descriptions, got %d", len(previous))
+	}
+	for _, description := range previous {
+		if !reporterToolDescriptionNeedsTemplateUpgrade(description) {
+			t.Fatal("previous stock tool description would retain superseded delivery instructions")
+		}
+	}
+	for _, preserved := range []string{findingReportToolDescription, findingReportToolDescription + " 用户自定义要求。", "自定义工具说明"} {
+		if reporterToolDescriptionNeedsTemplateUpgrade(preserved) {
+			t.Fatal("current or customized tool description would be replaced")
 		}
 	}
 }

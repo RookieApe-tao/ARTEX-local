@@ -384,24 +384,16 @@ CVSS 4.0：%s  评分 待计算（待计算）
 ## 描述
 
 %s
+此为合成样本，未对真实目标测试；影响未验证。
 
-### 定级依据
+## 修复建议
 
-此为合成测试，影响未验证。
-
-## 修复
-
-配置和源码位置未验证。
+现有材料不足以定位具体实现，需结合源码确认修复位置。
 
 ## 测试过程
 
-### 发现过程与攻击思路
-
-工具、参数、判据和时间未记录。
-
-### 失败尝试与未验证项
-
-未取得失败尝试记录，实际影响未验证。
+测试时间：未记录。
+执行工具：未记录；参数和判据未记录。未取得失败尝试记录，实际影响未验证。Burp Repeater 未实际使用，复测未验证；授权复测时将请求放入 Repeater 发送并按响应判据核对。
 
 ## 攻击链路
 
@@ -412,15 +404,7 @@ CVSS 4.0：%s  评分 待计算（待计算）
 
 ## 证据说明
 
-来源为本地合成测试记录。
-
-### Burp 复现
-
-原始请求未采集，Burp 复测未验证。
-
-### 复测标准
-
-业务判据未验证。`, vector, description)
+来源为本地合成测试记录，未采集原始请求和响应。`, vector, description)
 }
 
 func deliveryPacketFixture(t *testing.T, store *evidence.Store, requestHead, requestBody, responseHead, responseBody string) db.TrafficEvidenceSnapshot {

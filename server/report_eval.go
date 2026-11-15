@@ -134,15 +134,11 @@ func (s *Server) runReportEvalCase(w http.ResponseWriter, r *http.Request) {
 }
 
 func reportEvalPromptInput(sample reporteval.Case, material []byte) (map[string]string, error) {
-	evidence, err := materialEvidence(material)
+	evidenceInventory, err := materialEvidenceInventory(material)
 	if err != nil {
 		return nil, err
 	}
-	encodedFacts, err := json.Marshal(map[string]any{
-		"sample_id": sample.ID, "kind": sample.Kind, "synthetic": sample.Synthetic,
-		"test_time": sample.TestTime, "target": sample.Target,
-		"facts": sample.Facts, "evidence": evidence,
-	})
+	encodedFacts, err := json.Marshal(map[string]any{"evidence_inventory": evidenceInventory})
 	if err != nil {
 		return nil, fmt.Errorf("marshal report evaluation facts: %w", err)
 	}
@@ -168,10 +164,12 @@ func reportEvalPromptInput(sample reporteval.Case, material []byte) (map[string]
 		"task_description":                  "离线合成交付报告评测；不对应真实系统或真实测试。",
 		"task_goal":                         "仅根据固定样本写报告，不执行命令、不调用工具、不访问网络。",
 		"synthetic":                         strconv.FormatBool(sample.Synthetic),
+		"evidence_transport":                sample.Kind,
 		"evidence_origin":                   "离线合成报文与记录；没有访问真实目标或执行真实测试。",
 		"test_conditions":                   strings.Join(sample.Facts.Conditions, "\n"),
 		"recorded_failures":                 strings.Join(failures, "\n"),
 		"known_limitations":                 strings.Join(sample.Facts.Limitations, "\n"),
+		"test_tool_hint":                    sample.Facts.TestTool,
 		"cvss_vector_hint":                  sample.Facts.CVSSVector,
 		"test_time_hint":                    sample.TestTime,
 		"finding_name":                      sample.Name,
@@ -199,9 +197,19 @@ func evidenceHTTPStatus(response string) int {
 	return status
 }
 
-func materialEvidence(material []byte) (json.RawMessage, error) {
+func materialEvidenceInventory(material []byte) (json.RawMessage, error) {
 	var decoded struct {
-		Evidence json.RawMessage `json:"evidence"`
+		Evidence []struct {
+			Purpose          string `json:"purpose"`
+			Source           string `json:"source"`
+			RequestComplete  bool   `json:"request_complete"`
+			ResponseComplete bool   `json:"response_complete"`
+			Request          string `json:"request"`
+			Response         string `json:"response"`
+			Command          string `json:"command"`
+			Stdout           string `json:"stdout"`
+			Stderr           string `json:"stderr"`
+		} `json:"evidence"`
 	}
 	if err := json.Unmarshal(material, &decoded); err != nil {
 		return nil, fmt.Errorf("decode fixed report evaluation evidence: %w", err)
@@ -209,7 +217,27 @@ func materialEvidence(material []byte) (json.RawMessage, error) {
 	if len(decoded.Evidence) == 0 {
 		return nil, fmt.Errorf("fixed report evaluation sample has no evidence")
 	}
-	return decoded.Evidence, nil
+	type item struct {
+		Purpose          string `json:"purpose"`
+		Source           string `json:"source"`
+		RequestComplete  bool   `json:"request_complete,omitempty"`
+		ResponseComplete bool   `json:"response_complete,omitempty"`
+		HasRequest       bool   `json:"has_request,omitempty"`
+		HasResponse      bool   `json:"has_response,omitempty"`
+		HasCommand       bool   `json:"has_command,omitempty"`
+		HasStdout        bool   `json:"has_stdout,omitempty"`
+		HasStderr        bool   `json:"has_stderr,omitempty"`
+	}
+	inventory := make([]item, 0, len(decoded.Evidence))
+	for _, evidence := range decoded.Evidence {
+		inventory = append(inventory, item{
+			Purpose: evidence.Purpose, Source: evidence.Source,
+			RequestComplete: evidence.RequestComplete, ResponseComplete: evidence.ResponseComplete,
+			HasRequest: evidence.Request != "", HasResponse: evidence.Response != "",
+			HasCommand: evidence.Command != "", HasStdout: evidence.Stdout != "", HasStderr: evidence.Stderr != "",
+		})
+	}
+	return json.Marshal(inventory)
 }
 
 func reportEvalPackets(evidence []reporteval.Evidence, requests bool) string {

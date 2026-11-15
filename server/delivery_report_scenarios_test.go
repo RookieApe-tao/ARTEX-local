@@ -25,6 +25,7 @@ type deliveryReportScenario struct {
 		Observations []string `json:"observations"`
 		Conditions   []string `json:"conditions"`
 		Limitations  []string `json:"limitations"`
+		TestTool     string   `json:"test_tool"`
 		CVSSVector   string   `json:"cvss_vector"`
 	} `json:"facts"`
 	Evidence []struct {
@@ -110,7 +111,7 @@ func TestDeliveryReportScenarioCorpus(t *testing.T) {
 				if regexp.MustCompile(`\b` + regexp.QuoteMeta(item.ID) + `\b`).Match(content) {
 					t.Errorf("reference leaks internal evidence id %s instead of a descriptive name", item.ID)
 				}
-				if !strings.Contains(string(content), "#### "+item.Purpose+"\n") {
+				if !strings.Contains(string(content), "**"+item.Purpose+"**\n") {
 					t.Errorf("reference cannot locate material by its descriptive name %q", item.Purpose)
 				}
 				containsMaterial := func(material string) {

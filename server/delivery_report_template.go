@@ -258,30 +258,17 @@ func deliveryAttackChainHasTree(report string) bool {
 
 func validateDeliveryReportTemplate(report, expectedVector string) error {
 	report = stripDeliveryTrafficEvidence(report)
-	sections := strings.Split(agent.DeliveryReportSectionOrder, "、")
-	subsections := []struct {
-		section string
-		title   string
-		seen    bool
-	}{
-		{section: "描述", title: "定级依据"},
-		{section: "测试过程", title: "发现过程与攻击思路"},
-		{section: "测试过程", title: "失败尝试与未验证项"},
-		{section: "证据说明", title: "Burp 复现"},
-		{section: "证据说明", title: "复测标准"},
+	for _, phrase := range []string{"判决项", "归属对照", "人工执行", "测试侧无删除通道", "阴性结果", "零错配", "如实交付", "W07", "属主", "存在性哨兵", "公开投影", "逐位探测", "逐位读取"} {
+		if strings.Contains(report, phrase) {
+			return fmt.Errorf("交付报告含内部标签或实验记录用语，请改为直接说明请求、响应和业务结果")
+		}
 	}
+	sections := strings.Split(agent.DeliveryReportSectionOrder, "、")
 	sectionIndex, bodyStart := -1, 0
-	subsectionIndex, subsectionStart := -1, 0
-	lastSubsection := -1
+	sectionBodies := make(map[string]string, len(sections))
 	title, cvss := false, false
 	vectorOccurrences := 0
 	var problem string
-	checkSubsection := func(end int) {
-		if subsectionIndex >= 0 && !deliverySectionHasContent(report[subsectionStart:end]) {
-			problem = "“" + subsections[subsectionIndex].title + "”子节为空"
-		}
-		subsectionIndex = -1
-	}
 	closed := walkDeliveryMarkdown(report, func(line string, offset int) {
 		if problem != "" {
 			return
@@ -294,12 +281,6 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 			return
 		}
 		level, text := deliveryMarkdownHeading(line)
-		if level >= 1 && level <= 3 {
-			checkSubsection(offset)
-			if problem != "" {
-				return
-			}
-		}
 		if level == 1 {
 			if title || sectionIndex >= 0 || text == "" {
 				problem = "只能在报告头保留一个非空一级标题"
@@ -308,9 +289,13 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 			title = true
 		}
 		if level == 2 {
-			if sectionIndex >= 0 && !deliverySectionHasContent(report[bodyStart:offset]) {
-				problem = "“" + sections[sectionIndex] + "”章节为空"
-				return
+			if sectionIndex >= 0 {
+				body := report[bodyStart:offset]
+				if !deliverySectionHasContent(body) {
+					problem = "“" + sections[sectionIndex] + "”章节为空"
+					return
+				}
+				sectionBodies[sections[sectionIndex]] = body
 			}
 			next := sectionIndex + 1
 			if next >= len(sections) || text != sections[next] {
@@ -321,24 +306,9 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 			bodyStart = offset + len(line)
 			return
 		}
-		if level == 3 && sectionIndex >= 0 {
-			for i := range subsections {
-				subsection := &subsections[i]
-				if subsection.section != sections[sectionIndex] || subsection.title != text {
-					continue
-				}
-				if subsection.seen {
-					problem = "重复的子标题：“" + text + "”"
-					return
-				}
-				if i <= lastSubsection {
-					problem = "必需子标题顺序错误：“" + text + "”"
-					return
-				}
-				subsection.seen = true
-				lastSubsection = i
-				subsectionIndex, subsectionStart = i, offset+len(line)
-			}
+		if level > 2 && sectionIndex >= 0 {
+			problem = "正文使用固定五节标题，不要增加子标题：“" + text + "”"
+			return
 		}
 		if sectionIndex < 0 {
 			trimmed := strings.TrimSpace(line)
@@ -372,7 +342,9 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 		}
 	})
 	if problem == "" {
-		checkSubsection(len(report))
+		if sectionIndex >= 0 {
+			sectionBodies[sections[sectionIndex]] = report[bodyStart:]
+		}
 	}
 	if problem == "" && !closed {
 		problem = "代码块或 HTML 注释未闭合"
@@ -390,18 +362,53 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 		problem = "“证据说明”章节为空"
 	}
 	if problem == "" {
-		var missing []string
-		for _, subsection := range subsections {
-			if !subsection.seen {
-				missing = append(missing, subsection.section+"/"+subsection.title)
+		testProcess := strings.ToLower(sectionBodies["测试过程"])
+		testTimeLine := ""
+		for _, line := range strings.Split(sectionBodies["测试过程"], "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "测试时间：") {
+				testTimeLine = line
+				break
 			}
 		}
-		if len(missing) > 0 {
-			problem = "缺少必需三级标题：" + strings.Join(missing, "、")
+		if testTimeLine == "" {
+			problem = "“测试过程”须写测试时间；没有记录时写“测试时间：未记录”"
+		} else {
+			testTimeValue := strings.TrimSpace(strings.TrimPrefix(testTimeLine, "测试时间："))
+			testTimeValue, _, _ = strings.Cut(testTimeValue, "。")
+			if !strings.Contains(testTimeValue, "未记录") && !strings.Contains(testTimeValue, "北京时间") {
+				problem = "测试时间须标明北京时间；没有明确时区时写“测试时间：未记录”"
+			}
+		}
+		if problem == "" {
+			hasExecutionTool := false
+			for _, line := range strings.Split(sectionBodies["测试过程"], "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "执行工具：") {
+					hasExecutionTool = true
+					break
+				}
+			}
+			if !hasExecutionTool {
+				problem = "“测试过程”须注明执行工具；没有记录时写“执行工具：未记录”"
+			}
+		}
+		burpRepeater := strings.Contains(testProcess, "burp") && strings.Contains(testProcess, "repeater")
+		burpNotApplicable := strings.Contains(testProcess, "不适用") || strings.Contains(testProcess, "不适合")
+		if problem == "" && !burpRepeater && !burpNotApplicable {
+			problem = "“测试过程”须说明 Burp Repeater 的复现状态，或说明 Burp 不适用"
 		}
 	}
 	if problem == "" && !deliveryAttackChainHasTree(report) {
 		problem = "“攻击链路”必须包含 text 代码块树形链路，且有起点和带内容的分支"
+	}
+	if problem == "" && (strings.Contains(strings.ToLower(report), "sql") || strings.Contains(report, "注入")) {
+		remediation := sectionBodies["修复建议"]
+		for _, phrase := range []string{"输入校验与过滤", "关键字过滤", "过滤 SQL", "过滤特殊字符", "拒绝特殊字符", "转义输入", "转义 SQL"} {
+			if strings.Contains(remediation, phrase) {
+				problem = "SQL 注入修复建议应使用参数化查询，不要依赖关键字过滤、转义或拒绝特殊字符"
+				break
+			}
+		}
 	}
 	if problem != "" {
 		return fmt.Errorf("交付报告格式不符合固定模板：%s；二级标题必须按顺序为：%s。请保留各节，证据不足写“未验证”，补齐后重新保存", problem, strings.Join(sections, "、"))

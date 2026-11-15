@@ -38,7 +38,7 @@ func (p *reportEvalProvider) Complete(_ context.Context, request llm.CompletionR
 
 func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	t.Setenv("ARTEX_REPORT_EVAL_ENABLED", "false")
-	modelResponseJSON := `{"cvss_vector":"CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N","description":"描述\n### 定级依据\n依据样本中的状态变化。","remediation":"按服务端当前用户校验作业归属。","test_process":"### 发现过程与攻击思路\n按样本步骤核对。\n### 失败尝试与未验证项\n批量编号未验证。","attack_chain":"FENCEtext\n普通用户\n└─ 修改接口\n   └─ 作业状态发生变化\nFENCE","discovery_path":"### Burp 复现\n将样本请求放入 Repeater。\n### 复测标准\n其他用户修改应被拒绝。"}`
+	modelResponseJSON := `{"cvss_vector":"CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N","description":"普通用户可修改他人作业，状态随之改变。","remediation":"服务端校验当前账号是否有权修改该作业。","test_process":"使用样本中的普通用户请求修改作业，再以所有者账号读取并检查状态。Burp Repeater 复测未验证；授权测试时可重放附加请求。","attack_chain":"FENCEtext\n普通用户\n└─ 修改接口\n   └─ 作业状态发生变化\nFENCE","discovery_path":"来源为离线合成请求与响应，未对真实目标测试。"}`
 	provider := &reportEvalProvider{result: strings.ReplaceAll(modelResponseJSON, "FENCE", "```")}
 	s := &Server{llmProv: provider, llmOn: true, llmCfg: agent.Config{
 		Format: llm.FormatOpenAI, Model: "fixed-test-model", APIKey: "must-not-be-exposed",
@@ -142,11 +142,42 @@ func TestReportEvalPromptInputLabelsSyntheticMaterials(t *testing.T) {
 	if input["request_packet"] == "" || input["response_packet"] == "" {
 		t.Fatal("incomplete HTTP evidence must preserve both the request and the partial response")
 	}
+	if input["evidence_transport"] != "http" {
+		t.Fatalf("evidence transport=%q, want http", input["evidence_transport"])
+	}
+	if strings.Contains(input["evidence"], "/api/files/file-a/download") || strings.Contains(input["evidence"], "HTTP/1.1 200 OK") {
+		t.Fatal("evidence inventory must not duplicate packets already passed in dedicated fields")
+	}
+	if !strings.Contains(input["request_packet"], "/api/files/file-a/download") {
+		t.Fatal("dedicated request packet omitted the original request")
+	}
 	if input["cvss_vector_hint"] != sample.Facts.CVSSVector {
 		t.Fatalf("CVSS hint=%q, want %q", input["cvss_vector_hint"], sample.Facts.CVSSVector)
 	}
 	if input["test_time_hint"] != sample.TestTime {
 		t.Fatalf("test time hint=%q, want %q", input["test_time_hint"], sample.TestTime)
+	}
+	concurrency, concurrencyMaterial, err := reporteval.Load("concurrency")
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrencyInput, err := reportEvalPromptInput(concurrency, concurrencyMaterial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if concurrencyInput["test_tool_hint"] != concurrency.Facts.TestTool {
+		t.Fatalf("test tool hint=%q, want %q", concurrencyInput["test_tool_hint"], concurrency.Facts.TestTool)
+	}
+	nonHTTP, nonHTTPMaterial, err := reporteval.Load("non-http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonHTTPInput, err := reportEvalPromptInput(nonHTTP, nonHTTPMaterial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nonHTTPInput["evidence_transport"] != "non-http" {
+		t.Fatalf("non-HTTP evidence transport=%q", nonHTTPInput["evidence_transport"])
 	}
 }
 
@@ -202,15 +233,25 @@ func TestReportEvalReturnsSafeCompletionFailureCategory(t *testing.T) {
 func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) {
 	prompt := deliveryReportCompletionSystem()
 	for _, required := range []string{
-		"各字段只写章节正文，不重复二级标题",
-		"定级依据简要说明权限、条件和已观察影响",
-		"Burp 未实际使用时，写“Burp 复测未验证”",
-		"不要编造 Repeater 按钮、选项或并发能力",
+		"不得改字段名、增加字段或输出解释文字",
+		"不添加三级标题",
+		"test_process 首行写“测试时间：YYYY-MM-DD HH:mm:ss（北京时间）”或“测试时间：未记录”",
+		"执行工具：未记录",
+		"按 evidence_transport 字段选择写法",
+		"测试标记（包括 X-Eval-Actor）不是身份凭证",
+		"不要建议转义、过滤或拒绝特殊字符",
+		"Burp Repeater”及实际使用状态",
+		"Burp Repeater 未实际使用，复测未验证",
+		"Repeater 串行重放不能证明并发",
+		"按 evidence_transport 字段选择写法",
+		"不要抄写标记名或建议替换标记",
+		"SQL 注入修复只建议参数化查询",
+		"只有状态码或响应头时，不得称为未鉴权接口或数据泄露",
+		"有 test_time_hint 时在“测试时间：”后按“YYYY-MM-DD HH:mm:ss（北京时间）”格式写一次",
 		"输入有 cvss_vector_hint 时照抄该值",
-		"有 test_time_hint 时在测试过程中写一次",
-		"输入有 recorded_failures 时须逐项写入失败尝试",
+		"输入有 recorded_failures 时须写明这些失败结果",
 		"若输入标明 synthetic=true、evidence_origin 或测试未在真实目标执行",
-		"合成样本观察",
+		"只返回下列结构的 JSON 对象",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("report completion prompt is missing %q", required)
@@ -247,6 +288,7 @@ func TestStripDeliveryDraftSectionHeading(t *testing.T) {
 		want    string
 	}{
 		{"leading duplicate", "## 描述\n\n正文。", "描述", "正文。"},
+		{"remediation section heading", "## 修复建议\n\n服务端校验归属。", "修复建议", "服务端校验归属。"},
 		{"repeated leading duplicate", "## 描述\n## 描述\n正文。", "描述", "正文。"},
 		{"preserve different heading", "### 定级依据\n正文。", "描述", "### 定级依据\n正文。"},
 		{"preserve inline occurrence", "正文中引用 ## 描述。", "描述", "正文中引用 ## 描述。"},
@@ -263,6 +305,21 @@ func TestEnsureDeliveryAttackChainTextFence(t *testing.T) {
 	plain := "普通用户登录\n└─ GET /api/me\n   └─ 返回用户信息"
 	if got, want := ensureDeliveryAttackChainTextFence(plain), "```text\n"+plain+"\n```"; got != want {
 		t.Fatalf("plain chain=%q, want %q", got, want)
+	}
+	if got, want := ensureDeliveryAttackChainTextFence("text\n"+plain), "```text\n"+plain+"\n```"; got != want {
+		t.Fatalf("chain with duplicated language label=%q, want %q", got, want)
+	}
+	arrowChain := "入口：普通用户登录 -> POST /api/jobs/job-a/types -> 作业状态发生变化"
+	if got, want := ensureDeliveryAttackChainTextFence(arrowChain), "```text\n普通用户登录\n   └─ POST /api/jobs/job-a/types\n   └─ 作业状态发生变化\n```"; got != want {
+		t.Fatalf("arrow chain=%q, want %q", got, want)
+	}
+	if got, want := ensureDeliveryAttackChainTextFence("用户持有会话\n    └─ ↓\n    └─ > GET /api/me"), "```text\n用户持有会话\n    └─ GET /api/me\n```"; got != want {
+		t.Fatalf("decorated tree=%q, want %q", got, want)
+	}
+	decorated := "```text\n用户已登录且知晓目标作业编号\n   └─ ↓\n   └─ POST /api/jobs/job-a/types\n   └─ ↓\n   └─ 服务端未校验所有权，直接接受修改\n```"
+	want := "```text\n用户已登录且知晓目标作业编号\n   └─ POST /api/jobs/job-a/types\n   └─ 服务端未校验所有权，直接接受修改\n```"
+	if got := ensureDeliveryAttackChainTextFence(decorated); got != want {
+		t.Fatalf("decorated model tree=%q, want %q", got, want)
 	}
 	fenced := "```text\n" + plain + "\n```"
 	if got := ensureDeliveryAttackChainTextFence(fenced); got != fenced {

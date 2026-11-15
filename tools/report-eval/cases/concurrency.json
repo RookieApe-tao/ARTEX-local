@@ -21,6 +21,7 @@
       "串行重复提交、其他账号和更大并发量未测试。",
       "未记录服务端精确处理时间，不主张同刻执行。"
     ],
+    "test_tool": "Python 3.12 并发测试驱动脚本",
     "cvss_vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
   },
   "evidence": [
