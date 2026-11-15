@@ -424,7 +424,11 @@ const previousFindingReportToolDescription = "为已登记的漏洞一次写入/
 
 const previousFindingReportToolDescriptionTemplateV1 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。交付报告必须包含一级标题、漏洞名称和单行 CVSS 4.0 报告头，二级标题按顺序固定为：描述、修复、测试过程、攻击链路、证据说明；各节非空。描述内必须有三级标题“定级依据”；测试过程内必须有“发现过程与攻击思路”“失败尝试与未验证项”；证据说明内必须有“Burp 复现”“复测标准”。测试记录写清工具参数、判据和时间。缺少证据写“未验证”，不得补造；格式错误时按工具反馈补齐后重新保存。保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应，正文指明对应证据编号与用途，不要重复抄写绑定报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
-const findingReportToolDescription = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + agent.DeliveryReportSaveGuidance + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应，正文指明对应证据编号与用途，不要重复抄写绑定报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
+const previousFindingReportToolDescriptionTemplateV2 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。交付报告必须包含一个一级标题和一行 CVSS 4.0 信息。一级标题就是漏洞名称，不再另写“漏洞名称”字段；CVSS 向量、分数和等级只写一次。二级标题按顺序固定为：描述、修复、测试过程、攻击链路、证据说明；各节非空。描述内必须有三级标题“定级依据”；测试过程内必须有“发现过程与攻击思路”“失败尝试与未验证项”；证据说明内必须有“Burp 复现”“复测标准”。攻击链路必须包含 text 代码块树形图，写清起点和至少一条带内容的分支，并说明功能来源、接口或工具和实际结果。测试记录写清工具参数、判据和时间。缺少证据写“未验证”，不得补造；格式错误时按工具反馈补齐后重新保存。保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应，正文指明对应证据编号与用途，不要重复抄写绑定报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
+
+const previousFindingReportToolDescriptionTemplateV3 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。交付报告头只写一个漏洞名称和一行 CVSS 4.0 信息。二级标题必须逐字依次写为：漏洞描述、测试过程、攻击链路、修复建议、证据说明；不能缩写或换成近义标题。正文短句，优先写复现和修复；完整绑定报文由 ARTEX 自动附加，不要重抄。HTTP 测试过程写 Burp Repeater 的请求、账号会话、修改项、顺序和判据；并发测试先发基线查询，再将相同请求放入标签组选择 Send group in parallel，最后发回读查询；不编造线程控件。失败尝试和未验证边界简短说明，不得补造。保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
+
+const findingReportToolDescription = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + agent.DeliveryReportSaveGuidance + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
 // finding_id remains the finding node ID used by native report callers; writes
 // are task-agnostic and retain the existing evidence-version transaction.
@@ -621,7 +625,7 @@ func (s *Server) upgradeFindingReportToolSchema() {
 	}
 	description := current.Description
 	const oldDescription = "为已登记的漏洞写入/更新【详细报告】(Markdown 全文,整段覆盖旧内容)。finding_id 传 report_finding 返回的那个 id(\"finding recorded: <id>\" 里的数字)。报告建议包含:漏洞概述、影响与危害、复现步骤、证据/PoC、修复建议。"
-	if description == oldDescription || description == previousFindingReportToolDescription || description == previousFindingReportToolDescriptionTemplateV1 {
+	if description == oldDescription || description == previousFindingReportToolDescription || description == previousFindingReportToolDescriptionTemplateV1 || description == previousFindingReportToolDescriptionTemplateV2 {
 		description = tool.Description()
 	}
 	schema, err := json.Marshal(tool.InputSchema())
@@ -708,7 +712,9 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 	switch fmt.Sprintf("%x", sha256.Sum256([]byte(prompt))) {
 	case "b1ab0800d8137a0476f02d6e2b7e5380133b62f060096ad52dc412769af152c9", // 旧版默认交付规范
 		"8b3000d01b7f8bdee0a4b1f4fcee3beb8350744d10144c5c2669090acffd83ed", // 补回攻击链章节的默认值
-		"8f8e5a14828823f4b3ca6f255ed0a8775787bb31d08c5cb2c5576222ad2a81bd": // 当前旧版固定五节模板
+		"8f8e5a14828823f4b3ca6f255ed0a8775787bb31d08c5cb2c5576222ad2a81bd", // 旧版固定五节模板
+		"169a228581af77e71037a37fb350013c6e5d9d7e3ffa80fd5ff1d2cbec2618c4", // 精简标题与树形攻击链默认值
+		"66b2c31047b3b2ad974673d5cbf4462e4be4f0274b455876b5f51a5131bd151d": // 已知旧版改写标题与限制规则
 		return true
 	default:
 		return false
@@ -716,7 +722,7 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 }
 
 func (s *Server) upgradeReporterDeliveryTemplate() {
-	const flag = "reporter_prompt_delivery_template_v2"
+	const flag = "reporter_prompt_delivery_template_v4"
 	value, _, err := s.m.pg.GetSetting(flag)
 	if err != nil {
 		log.Printf("[reporter] 读取固定模板迁移标记失败: %v", err)
@@ -728,7 +734,7 @@ func (s *Server) upgradeReporterDeliveryTemplate() {
 	// Only refresh the known stock description; edited schema and bindings stay
 	// authoritative, while runtime guidance still explains the save contract.
 	if _, err := s.m.pg.Exec(`UPDATE tools SET description=$1,updated_at=now()
-WHERE key='update_finding_report' AND system AND description IN ($2,$3)`, findingReportToolDescription, previousFindingReportToolDescription, previousFindingReportToolDescriptionTemplateV1); err != nil {
+WHERE key='update_finding_report' AND system AND description IN ($2,$3,$4,$5)`, findingReportToolDescription, previousFindingReportToolDescription, previousFindingReportToolDescriptionTemplateV1, previousFindingReportToolDescriptionTemplateV2, previousFindingReportToolDescriptionTemplateV3); err != nil {
 		log.Printf("[reporter] 更新固定模板工具说明失败: %v", err)
 		return
 	}
@@ -750,7 +756,7 @@ WHERE key='update_finding_report' AND system AND description IN ($2,$3)`, findin
 			log.Printf("[reporter] 升级固定交付模板失败: %v", err)
 			return
 		}
-		log.Printf("[reporter] 默认 prompt 已升级为真人可读版式与树形攻击链")
+		log.Printf("[reporter] 默认 prompt 已升级为固定五节报告规范")
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存固定模板 prompt 迁移标记失败: %v", err)
@@ -891,10 +897,13 @@ const reporterToolCallMessageV2Legacy = "上面刚有一个漏洞被 report_find
 	"最后调用 update_finding_report(finding_id=finding_node_id, report, delivery_report, cvss_vector, evidence_version=实际读取版本) 一次保存两份报告；" +
 	"evidence_version 必须传，否则报告会被永久标记为待更新。不要混用两种编号。"
 
+// Keep legacy text independent of current rules so saved stock triggers remain recognizable.
+const reporterLegacySaveGuidanceV5 = "交付报告必须包含一个一级标题和一行 CVSS 4.0 信息。一级标题就是漏洞名称，不再另写“漏洞名称”字段；CVSS 向量、分数和等级只写一次。二级标题按顺序固定为：描述、修复、测试过程、攻击链路、证据说明；各节非空。描述内必须有三级标题“定级依据”；测试过程内必须有“发现过程与攻击思路”“失败尝试与未验证项”；证据说明内必须有“Burp 复现”“复测标准”。攻击链路必须包含 text 代码块树形图，写清起点和至少一条带内容的分支，并说明功能来源、接口或工具和实际结果。测试记录写清工具参数、判据和时间。缺少证据写“未验证”，不得补造；格式错误时按工具反馈补齐后重新保存。"
+
 const reporterToolCallMessageV5 = "上面刚有一个漏洞被 report_finding 登记。请读取返回 JSON 的 finding_id（独立漏洞记录 ID）与 finding_node_id（探索节点 ID），" +
 	"用 get_task_node_detail 和执行记录取全本次漏洞的发现线索、攻击思路、测试项、工具参数、判据、时间、失败尝试及未验证项；" +
 	"先按运行指引核实并关联已有流量，再用 get_finding_traffic(finding_id) 读取当前证据清单及 version（空清单可正常写报告，不猜测流量编号）。" +
-	"基于同组证据一次写出详细报告和面向开发修复的交付报告。" + agent.DeliveryReportSaveGuidance +
+	"基于同组证据一次写出详细报告和面向开发修复的交付报告。" + reporterLegacySaveGuidanceV5 +
 	"攻击链路用简短树形逐步写出身份条件、操作、响应和影响，并对应测试记录；提供可在 Burp Repeater 复现的完整请求及会话、发送方式和判据，未实际在 Burp 验证要说明。" +
 	"ARTEX 会在证据说明内成对附加绑定报文；未绑定原始包按真实来源引用，不虚构、不把其他账号记录贴作本次证据。" +
 	"最后调用 update_finding_report(finding_id=finding_node_id, report, delivery_report, cvss_vector, evidence_version=实际读取版本) 一次保存两份报告；格式不符合工具反馈时补齐后重试。"
@@ -906,19 +915,37 @@ const reporterToolCallMessageV6 = "上面刚有一个漏洞被 report_finding �
 	"按固定五节模板撰写，中文短句，避免内部术语，避免重复标题、接口清单、CVSS 信息和完整报文。已绑定报文由 ARTEX 自动附加；未绑定原始报文按实际来源完整引用，不编造。" +
 	"最后调用 update_finding_report(finding_id=finding_node_id, report, delivery_report, cvss_vector, evidence_version=实际读取版本) 一次保存两份报告；格式不符合工具反馈时补齐后重试。"
 
-const reporterToolCallMessage = reporterToolCallMessageV6
+const reporterToolCallMessageV7 = "上面刚有一个漏洞被 report_finding 登记。请从返回 JSON 取得 finding_id（独立漏洞记录 ID）和 finding_node_id（探索节点 ID）。" +
+	"读取本漏洞节点、相关执行记录和已有材料，核对实际观察、成立条件、未验证影响及证据位置。按运行指引关联已有流量，并用 get_finding_traffic(finding_id) 取得证据清单及 version。" +
+	"按当前交付规范写详细报告和交付报告；正文用具体用途称呼材料，不抄写内部证据 ID。已绑定报文由 ARTEX 自动附加，其他材料按真实来源引用，不编造或为补证据重新探测目标。" +
+	"最后调用 update_finding_report(finding_id=finding_node_id, report, delivery_report, cvss_vector, evidence_version=实际读取的 version) 一次保存两份报告，按明确的保存错误修正后重试。"
+
+const reporterToolCallMessageV8 = "上面刚有一个漏洞被 report_finding 登记。请从返回 JSON 取得 finding_id（独立漏洞记录 ID）和 finding_node_id（探索节点 ID）。" +
+	"读取本漏洞节点、执行记录和原始材料，核对发现思路、成立条件、实际操作、结果、失败尝试、未验证影响及证据位置；旧报告和执行摘要只作线索。按运行指引核对已有流量，并用 get_finding_traffic(finding_id) 取得证据清单及 version。" +
+	"一次写出详细报告和交付报告。交付报告按固定顺序使用“描述、修复、测试过程、攻击链路、证据说明”五节，并保留“定级依据”“发现过程与攻击思路”“失败尝试与未验证项”“Burp 复现”“复测标准”子标题。详细报告保留完整工具参数、时间和逐项结果；交付正文只写复现必需的账号或会话、关键参数、操作顺序和判据，其他细节不重复。原始报文由 ARTEX 完整附加。" +
+	"最后调用 update_finding_report(finding_id=finding_node_id, report, delivery_report, cvss_vector, evidence_version=实际读取的 version) 一次保存两份报告。"
+
+const reporterToolCallMessage = reporterToolCallMessageV8
 
 // 旧版触发消息(0.3.8 及更早)。只有仍与它逐字相同的记录才会被迁移覆盖，用户改过的保持原样。
 const reporterToolCallMessageV1 = "上面刚有一个漏洞被 report_finding 登记。请从触发上下文里取出 finding_id" +
 	"（工具返回 \"finding recorded: <id>\" 里的数字）与任务 id，按你的职责撰写该漏洞的详细报告，" +
 	"最后调用 update_finding_report(finding_id, report) 保存。"
 
-// upgradeReporterTriggerMessage 把老库里仍是默认文案的 reporter 触发消息刷成新版本。
-// seedReporterAgent 受 reporter_agent_seed_v1 守卫且只在新建 agent 时写触发器，所以
-// 升级上来的库拿不到新文案 —— 工具 schema 由 seedFindingTrafficTools 补齐了
-// evidence_version，但没有任何东西告诉 reporter 去用它。一次性，且只覆盖未被改动的文案。
+func reporterTriggerMessageNeedsUpgrade(message string) bool {
+	switch message {
+	case reporterToolCallMessageV1, reporterToolCallMessageV2, reporterToolCallMessageV2Legacy,
+		reporterToolCallMessageV3, reporterToolCallMessageV4, reporterToolCallMessageV5, reporterToolCallMessageV6, reporterToolCallMessageV7:
+		return true
+	default:
+		return false
+	}
+}
+
+// Existing installations keep editable triggers, so only known stock messages
+// can receive new guidance without overwriting the user's workflow.
 func (s *Server) upgradeReporterTriggerMessage() {
-	const flag = "reporter_trigger_delivery_report_v6"
+	const flag = "reporter_trigger_delivery_report_v8"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}
@@ -928,13 +955,7 @@ func (s *Server) upgradeReporterTriggerMessage() {
 		return
 	}
 	for _, t := range triggers {
-		if !t.OnToolCall || (t.ToolCallMessage != reporterToolCallMessageV1 &&
-			t.ToolCallMessage != reporterToolCallMessageV2 &&
-			t.ToolCallMessage != reporterToolCallMessageV2Legacy &&
-			t.ToolCallMessage != reporterToolCallMessageV3 &&
-			t.ToolCallMessage != reporterToolCallMessageV4 &&
-			t.ToolCallMessage != reporterToolCallMessageV5 &&
-			t.ToolCallMessage != reporterToolCallMessageV6) {
+		if !t.OnToolCall || !reporterTriggerMessageNeedsUpgrade(t.ToolCallMessage) {
 			continue // 用户改过或不是 finding 触发器，不动。
 		}
 		t.ToolCallMessage = reporterToolCallMessage
@@ -942,7 +963,7 @@ func (s *Server) upgradeReporterTriggerMessage() {
 			log.Printf("[reporter] 升级触发消息失败: %v", err)
 			return
 		}
-		log.Printf("[reporter] 触发消息已升级为树形攻击链与精简报告版式")
+		log.Printf("[reporter] 触发消息已升级为固定五节交付报告规范")
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存触发消息迁移标记失败: %v", err)

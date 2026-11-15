@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "idor",
+  "kind": "http",
+  "name": "普通用户修改其他用户的脱敏设置",
+  "synthetic": true,
+  "test_time": "2026-11-01T10:00:00+08:00",
+  "target": "https://report-eval.invalid",
+  "facts": {
+    "observations": [
+      "user-a 和 user-b 均为普通用户且没有共享作业授权。",
+      "user-b 使用自己的身份修改 job-a；user-a 再次查询到 selectedTypes 从空变为 name，state 从 WAITING 变为 SUCCESS，formalAvailable 变为 true。",
+      "未提供身份的请求返回 401。"
+    ],
+    "conditions": [
+      "攻击者已登录，知道 job-a 编号；作业尚未选择敏感类型。"
+    ],
+    "limitations": [
+      "没有取得正式文件正文，是否实际漏脱敏未验证。",
+      "没有测试批量编号枚举或其他状态的作业。"
+    ],
+    "cvss_vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
+  },
+  "evidence": [
+    {
+      "id": "E01",
+      "purpose": "修改前查询",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "GET /api/jobs/job-a HTTP/1.1\r\nHost: report-eval.invalid\r\nX-Eval-Actor: user-a\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 92\r\n\r\n{\"id\":\"job-a\",\"owner\":\"user-a\",\"selectedTypes\":[],\"state\":\"WAITING\",\"formalAvailable\":false}"
+    },
+    {
+      "id": "E02",
+      "purpose": "其他用户提交修改",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "POST /api/jobs/job-a/types HTTP/1.1\r\nHost: report-eval.invalid\r\nX-Eval-Actor: user-b\r\nContent-Type: application/json\r\nContent-Length: 26\r\n\r\n{\"selectedTypes\":[\"name\"]}",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\n{\"ok\":true}"
+    },
+    {
+      "id": "E03",
+      "purpose": "修改后查询",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "GET /api/jobs/job-a HTTP/1.1\r\nHost: report-eval.invalid\r\nX-Eval-Actor: user-a\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 97\r\n\r\n{\"id\":\"job-a\",\"owner\":\"user-a\",\"selectedTypes\":[\"name\"],\"state\":\"SUCCESS\",\"formalAvailable\":true}"
+    },
+    {
+      "id": "E04",
+      "purpose": "不带身份提交修改",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "POST /api/jobs/job-a/types HTTP/1.1\r\nHost: report-eval.invalid\r\nContent-Type: application/json\r\nContent-Length: 26\r\n\r\n{\"selectedTypes\":[\"name\"]}",
+      "response": "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: 35\r\n\r\n{\"error\":\"authentication_required\"}"
+    }
+  ],
+  "review": {
+    "must_preserve": [
+      "说明两个普通用户分别使用自己的身份。",
+      "以前后查询的字段变化证明修改成功。",
+      "保留已知作业编号和等待选择这一成立条件。"
+    ],
+    "must_not_claim": [
+      "不得声称已下载正式文件或已泄露真实敏感数据。",
+      "不得声称能枚举所有作业、修改任意状态的作业或服务器代码已审查。"
+    ],
+    "evidence_gaps": [
+      "没有取得正式文件正文，是否实际漏脱敏未验证。",
+      "没有测试批量编号枚举或其他状态的作业。"
+    ]
+  },
+  "reference_report": "idor.reference.md"
+}

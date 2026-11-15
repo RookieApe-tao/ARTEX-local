@@ -83,9 +83,29 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptNeedsTemplateUpgrade(attackChainOnly) {
 		t.Fatal("attack-chain-only stock default would not receive the fixed template")
 	}
-	for _, customized := range []string{string(previous) + "\n用户自定义要求。", "自定义报告模板", agent.ReporterDefaultPrompt} {
+	latestPrevious, err := os.ReadFile("testdata/reporter-default-v4.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reporterPromptNeedsTemplateUpgrade(string(latestPrevious)) {
+		t.Fatal("previous stock tree-template default would not receive the concise delivery rules")
+	}
+	for _, customized := range []string{string(previous) + "\n用户自定义要求。", string(latestPrevious) + "\n用户自定义要求。", "自定义报告模板", agent.ReporterDefaultPrompt} {
 		if reporterPromptNeedsTemplateUpgrade(customized) {
 			t.Fatal("custom or already current prompt would be replaced")
+		}
+	}
+}
+
+func TestReporterTriggerUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T) {
+	for _, previous := range []string{reporterToolCallMessageV1, reporterToolCallMessageV2, reporterToolCallMessageV2Legacy, reporterToolCallMessageV3, reporterToolCallMessageV4, reporterToolCallMessageV5, reporterToolCallMessageV6, reporterToolCallMessageV7} {
+		if !reporterTriggerMessageNeedsUpgrade(previous) {
+			t.Fatal("previous stock trigger would retain superseded delivery instructions")
+		}
+	}
+	for _, preserved := range []string{reporterToolCallMessage, reporterToolCallMessageV6 + "\n用户自定义要求。", "自定义触发内容"} {
+		if reporterTriggerMessageNeedsUpgrade(preserved) {
+			t.Fatal("custom or already current trigger would be replaced")
 		}
 	}
 }

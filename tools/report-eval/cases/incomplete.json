@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "incomplete",
+  "kind": "http",
+  "name": "下载接口只有状态码而缺少文件正文",
+  "synthetic": true,
+  "test_time": "2026-11-01T10:00:00+08:00",
+  "target": "https://report-eval.invalid",
+  "facts": {
+    "observations": [
+      "user-b 请求已知属于 user-a 的测试文件编号。",
+      "只留存 HTTP 200 响应头，文件正文未保存，无法判断返回的是文件、提示页或其他内容。",
+      "没有文件哈希、用户 A 的基线下载或独立复核。"
+    ],
+    "conditions": [
+      "只有请求和响应头，当前材料属于待核实线索，不能据此新登记已确认漏洞。"
+    ],
+    "limitations": [
+      "缺少响应正文、文件内容核对、账号权限证明和失败尝试记录。",
+      "没有实际 Burp 重放记录。"
+    ],
+    "cvss_vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N"
+  },
+  "evidence": [
+    {
+      "id": "E01",
+      "purpose": "请求他人文件",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": false,
+      "request": "GET /api/files/file-a/download HTTP/1.1\r\nHost: report-eval.invalid\r\nX-Eval-Actor: user-b\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 48\r\n\r\n"
+    }
+  ],
+  "review": {
+    "must_preserve": [
+      "明确写未验证，状态码不能证明下载成功。",
+      "准确说明响应头已留存、正文未取得。",
+      "缺少失败记录时不编造失败请求。"
+    ],
+    "must_not_claim": [
+      "不得声称已下载他人文件、已泄露数据、已确认越权。",
+      "不得补造响应正文、账号校验、失败尝试或已完成复测。"
+    ],
+    "evidence_gaps": [
+      "缺少响应正文、文件内容核对、账号权限证明和失败尝试记录。",
+      "没有实际 Burp 重放记录。"
+    ]
+  },
+  "reference_report": "incomplete.reference.md"
+}

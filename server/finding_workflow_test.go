@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	actool "github.com/Autumn-27/norma/tool"
 	"github.com/wpsec/ARTEX-local/agent"
 	"github.com/wpsec/ARTEX-local/db"
-	actool "github.com/Autumn-27/norma/tool"
 )
 
 func workflowCall(t *testing.T, ctx context.Context, tool actool.CoreTool, input any, wantError bool) string {
@@ -185,8 +185,8 @@ func TestFindingWorkflowAutoHintToPlannerAndSetting(t *testing.T) {
 	workflowCall(t, ctx, s.toolGetFindingTraffic(), map[string]any{"finding_id": recorded.FindingID}, false)
 	tools, def, closeTools := agent.AugmentTools(ctx, "planner", ts.PlannerTools())
 	defer closeTools()
-	if def.FindingGuidance != "" {
-		t.Fatal("disabled feature still injects guidance")
+	if strings.Contains(def.FindingGuidance, "报告前自动关联流量") || strings.Contains(def.FindingGuidance, "流量证据交接（可选）") {
+		t.Fatal("disabled feature still injects auto-binding guidance")
 	}
 	for _, tool := range tools {
 		if tool.Name() == "bind_finding_traffic" {
@@ -315,8 +315,8 @@ func TestFindingWorkflowReporterBindsBeforeWritingReport(t *testing.T) {
 	}
 	off, offDef, closeOff := agent.AugmentTools(ctx, "reporter", nil)
 	defer closeOff()
-	if offDef.FindingGuidance != "" {
-		t.Fatal("off reporter still receives auto-binding guidance")
+	if !strings.Contains(offDef.FindingGuidance, agent.DeliveryReportRuntimeGuidance) || !strings.Contains(offDef.FindingGuidance, agent.DeliveryReportStyleGuidance) || strings.Contains(offDef.FindingGuidance, "报告前自动关联流量") {
+		t.Fatal("off reporter lost report writing guidance or still receives auto-binding guidance")
 	}
 	for _, tool := range off {
 		if tool.Name() == "traffic_search" || tool.Name() == "traffic_get" || tool.Name() == "traffic_blob" || tool.Name() == "bind_finding_traffic" {

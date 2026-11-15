@@ -765,6 +765,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/llm", s.getLLM)
 	mux.HandleFunc("POST /api/llm", s.setLLM)
 	mux.HandleFunc("POST /api/llm/test", s.testLLM)
+	// 固定报告样本评测仅用于本地验证，默认关闭；路由仍经过统一 JWT 鉴权。
+	mux.HandleFunc("GET /api/report-eval", s.reportEvalInfo)
+	mux.HandleFunc("POST /api/report-eval/{case_id}", s.runReportEvalCase)
 
 	// asset system
 	mux.HandleFunc("GET /api/assets", s.listAssets)

@@ -198,12 +198,16 @@ func deliveryAttackChainHasTree(report string) bool {
 	fenceLength := 0
 	textFence := false
 	treeRoot := false
+	treeBranch := false
+	inComment := false
 	for offset := 0; offset < len(body); {
 		next := len(body)
 		lineEnd := strings.IndexByte(body[offset:], '\n')
 		if lineEnd >= 0 {
 			next = offset + lineEnd + 1
 			lineEnd += offset
+		} else {
+			lineEnd = len(body)
 		}
 		line := strings.TrimSuffix(body[offset:lineEnd], "\r")
 		offset = next
@@ -213,25 +217,33 @@ func deliveryAttackChainHasTree(report string) bool {
 			for run < len(trimmed) && trimmed[run] == fence {
 				run++
 			}
-			if run >= fenceLength && strings.TrimSpace(trimmed[run:]) == "" {
+			if !deliveryIndentedCode(line) && run >= fenceLength && strings.TrimSpace(trimmed[run:]) == "" {
+				if textFence && treeRoot && treeBranch {
+					return true
+				}
 				fence, fenceLength, textFence = 0, 0, false
 				continue
 			}
 			if textFence {
-				for _, branch := range []string{"├─", "└─"} {
-					if strings.HasPrefix(trimmed, branch) && strings.TrimSpace(strings.TrimPrefix(trimmed, branch)) != "" {
-						if treeRoot {
-							return true
-						}
-						continue
-					}
+				node := strings.TrimLeft(trimmed, "│ \t")
+				branch := strings.HasPrefix(node, "├─") || strings.HasPrefix(node, "└─")
+				if branch && treeRoot && strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(node, "├─"), "└─")) != "" {
+					treeBranch = true
 				}
-				if trimmed != "" && !strings.HasPrefix(trimmed, "├─") && !strings.HasPrefix(trimmed, "└─") {
+				if node != "" && !branch {
 					treeRoot = true
 				}
 			}
 			continue
 		}
+		if deliveryIndentedCode(line) && !inComment {
+			continue
+		}
+		line = deliveryVisibleLine(line, &inComment)
+		if deliveryIndentedCode(line) {
+			continue
+		}
+		trimmed = strings.TrimSpace(line)
 		marker, length := deliveryOpeningFence(line)
 		if marker == 0 {
 			continue
@@ -239,7 +251,7 @@ func deliveryAttackChainHasTree(report string) bool {
 		fence, fenceLength = marker, length
 		info := strings.Fields(strings.TrimSpace(trimmed[length:]))
 		textFence = len(info) > 0 && info[0] == "text"
-		treeRoot = false
+		treeRoot, treeBranch = false, false
 	}
 	return false
 }
@@ -260,6 +272,7 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 	}
 	sectionIndex, bodyStart := -1, 0
 	subsectionIndex, subsectionStart := -1, 0
+	lastSubsection := -1
 	title, cvss := false, false
 	var problem string
 	checkSubsection := func(end int) {
@@ -310,7 +323,12 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 					problem = "重复的子标题：“" + text + "”"
 					return
 				}
+				if i <= lastSubsection {
+					problem = "必需子标题顺序错误：“" + text + "”"
+					return
+				}
 				subsection.seen = true
+				lastSubsection = i
 				subsectionIndex, subsectionStart = i, offset+len(line)
 			}
 		}
@@ -375,7 +393,7 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 		problem = "“攻击链路”必须包含 text 代码块树形链路，且有起点和带内容的分支"
 	}
 	if problem != "" {
-		return fmt.Errorf("交付报告格式不符合固定模板：%s；二级标题必须按顺序为：%s。请保留各节，证据不足写“未验证”，补齐后重新保存", problem, agent.DeliveryReportSectionOrder)
+		return fmt.Errorf("交付报告格式不符合固定模板：%s；二级标题必须按顺序为：%s。请保留各节，证据不足写“未验证”，补齐后重新保存", problem, strings.Join(sections, "、"))
 	}
 	return nil
 }
