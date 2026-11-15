@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -90,7 +91,18 @@ func (s *Server) runReportEvalCase(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	draft, usage, err := completeDeliveryReportWith(ctx, input, 0, provider.Complete)
 	if err != nil {
-		writeErr(w, http.StatusBadGateway, "报告样本生成失败")
+		message := "报告模型调用失败"
+		status := http.StatusBadGateway
+		switch {
+		case errors.Is(err, errDeliveryReportInvalidJSON):
+			message = "模型未返回可解析的报告字段"
+		case errors.Is(err, errDeliveryReportMissingBody):
+			message = "模型报告字段不完整"
+		case errors.Is(ctx.Err(), context.DeadlineExceeded):
+			message = "模型请求超时"
+			status = http.StatusGatewayTimeout
+		}
+		writeErr(w, status, message)
 		return
 	}
 	draft.RequestPacket = input["request_packet"]

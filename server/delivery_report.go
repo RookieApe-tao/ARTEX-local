@@ -27,6 +27,11 @@ const (
 	deliveryEvidenceAppendixMarker = "<!-- artex:bound-traffic-evidence -->"
 )
 
+var (
+	errDeliveryReportInvalidJSON = errors.New("模型没有返回有效的报告 JSON")
+	errDeliveryReportMissingBody = errors.New("报告缺少必需内容")
+)
+
 type deliveryReportAccess struct {
 	task      *Task
 	taskID    int64
@@ -242,7 +247,7 @@ func completeDeliveryReportWith(
 	text = strings.TrimSuffix(strings.TrimSpace(text), "```")
 	var draft deliveryReportDraft
 	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &draft); err != nil {
-		return deliveryReportDraft{}, usage, fmt.Errorf("模型没有返回有效的报告 JSON")
+		return deliveryReportDraft{}, usage, errDeliveryReportInvalidJSON
 	}
 	draft.Description = strings.TrimSpace(draft.Description)
 	draft.Remediation = strings.TrimSpace(draft.Remediation)
@@ -251,7 +256,7 @@ func completeDeliveryReportWith(
 	draft.DiscoveryPath = strings.TrimSpace(draft.DiscoveryPath)
 	if draft.Description == "" || draft.Remediation == "" || draft.TestProcess == "" ||
 		draft.AttackChain == "" || draft.DiscoveryPath == "" {
-		return deliveryReportDraft{}, usage, errors.New("报告缺少必需内容")
+		return deliveryReportDraft{}, usage, errDeliveryReportMissingBody
 	}
 	draft.EvidenceVersion = evidenceVersion
 	return draft, usage, nil

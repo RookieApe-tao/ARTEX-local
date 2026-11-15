@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"iter"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ type reportEvalProvider struct {
 	request llm.CompletionRequest
 	calls   int
 	result  string
+	err     error
 }
 
 func (p *reportEvalProvider) Stream(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
@@ -27,6 +29,9 @@ func (p *reportEvalProvider) Stream(context.Context, llm.CompletionRequest) iter
 func (p *reportEvalProvider) Complete(_ context.Context, request llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
 	p.request = request
 	p.calls++
+	if p.err != nil {
+		return llm.Message{}, "", llm.Usage{}, p.err
+	}
 	return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock(p.result)}}, "end_turn", llm.Usage{InputTokens: 17, OutputTokens: 23}, nil
 }
 
@@ -118,5 +123,43 @@ func TestReportEvalPromptInputLabelsSyntheticMaterials(t *testing.T) {
 	}
 	if input["request_packet"] == "" || input["response_packet"] == "" {
 		t.Fatal("incomplete HTTP evidence must preserve both the request and the partial response")
+	}
+}
+
+func TestReportEvalReturnsSafeCompletionFailureCategory(t *testing.T) {
+	t.Setenv("ARTEX_REPORT_EVAL_ENABLED", "true")
+	tests := []struct {
+		name        string
+		result      string
+		providerErr error
+		wantMessage string
+		mustHide    string
+	}{
+		{name: "provider error", providerErr: errors.New("upstream token=secret-value"), wantMessage: "报告模型调用失败", mustHide: "secret-value"},
+		{name: "invalid JSON", result: "not JSON", wantMessage: "模型未返回可解析的报告字段"},
+		{name: "missing fields", result: `{}`, wantMessage: "模型报告字段不完整"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &reportEvalProvider{result: tt.result, err: tt.providerErr}
+			s := &Server{llmProv: provider, llmOn: true, llmCfg: agent.Config{Model: "fixed-test-model"}, jwtKey: []byte("report-eval-test-signing-key")}
+			token, err := signJWT(s.jwtKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/report-eval/idor", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			response := httptest.NewRecorder()
+			s.Handler().ServeHTTP(response, req)
+			if response.Code != http.StatusBadGateway {
+				t.Fatalf("status=%d body=%s, want 502", response.Code, response.Body.String())
+			}
+			if !strings.Contains(response.Body.String(), tt.wantMessage) {
+				t.Fatalf("body=%s, want safe category %q", response.Body.String(), tt.wantMessage)
+			}
+			if tt.mustHide != "" && strings.Contains(response.Body.String(), tt.mustHide) {
+				t.Fatalf("response leaked provider error detail: %s", response.Body.String())
+			}
+		})
 	}
 }

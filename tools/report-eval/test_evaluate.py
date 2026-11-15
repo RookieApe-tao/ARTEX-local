@@ -1,8 +1,10 @@
 import argparse
 import importlib.util
+import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location("report_eval", Path(__file__).with_name("evaluate.py"))
@@ -145,6 +147,71 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertIn("CVSS 4.0：" + case["facts"]["cvss_vector"], report)
         self.assertIn("评分", report)
         self.assertEqual(EVAL.metrics(case, report)["headings"], EVAL.HEADINGS)
+
+    def test_api_json_preserves_safe_server_error_message(self):
+        error = EVAL.urllib.error.HTTPError(
+            "http://127.0.0.1:8787/api/report-eval/idor",
+            502,
+            "Bad Gateway",
+            {},
+            io.BytesIO('{"error":"模型报告字段不完整"}'.encode()),
+        )
+        with patch.object(EVAL.urllib.request, "build_opener") as build_opener:
+            build_opener.return_value.open.side_effect = error
+            with self.assertRaisesRegex(ValueError, "模型报告字段不完整"):
+                EVAL.api_json("http://127.0.0.1:8787", "/api/report-eval/idor")
+
+    def test_live_evaluation_continues_and_records_other_case_failures(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "live"
+            calls = []
+
+            def api_json(_base, path, method="GET", payload=None, token=None):
+                if path == "/api/auth/login":
+                    return {"token": "secret-test-token"}
+                if path == "/api/report-eval":
+                    return {
+                        "case_ids": sorted(EVAL.cases_by_id()),
+                        "model": "fixture-model",
+                        "provider_source": "fixture",
+                        "max_output_tokens": 4096,
+                        "system_sha256": "fixture-policy-hash",
+                    }
+                case_id = path.rsplit("/", 1)[-1]
+                calls.append(case_id)
+                if case_id == "concurrency":
+                    raise ValueError("ARTEX 本地接口返回 HTTP 502：模型请求失败")
+                case = EVAL.cases_by_id()[case_id]
+                return {
+                    "draft": {
+                        "cvss_vector": case["facts"]["cvss_vector"],
+                        "description": "问题说明。\n### 定级依据\n依据合成材料中的观察。",
+                        "remediation": "在服务端落实对应的业务校验。",
+                        "test_process": "### 发现过程与攻击思路\n按样本材料核对。\n### 失败尝试与未验证项\n未覆盖的边界仍待验证。",
+                        "attack_chain": "```text\n普通用户\n└─ 请求对应接口\n   └─ 观察到样本结果\n```",
+                        "discovery_path": "### Burp 复现\n将样本请求放入 Repeater。\n### 复测标准\n按修复后的预期结果核对。",
+                    },
+                    "usage": {"input_tokens": 10, "output_tokens": 20},
+                    "duration_ms": 100,
+                    "provider_source": "fixture",
+                }
+
+            args = argparse.Namespace(
+                base_url="http://127.0.0.1:8787",
+                label="after",
+                output=str(target),
+            )
+            with patch.object(EVAL.getpass, "getpass", return_value="test-password"), patch.object(EVAL, "api_json", side_effect=api_json):
+                with self.assertRaisesRegex(ValueError, "1 个样本生成失败"):
+                    EVAL.run_live(args)
+
+            self.assertEqual(calls, sorted(EVAL.cases_by_id()))
+            evaluation = EVAL.read_json(target / "report-evaluation.json")
+            self.assertEqual(evaluation["cases"]["concurrency"]["status"], "生成失败")
+            self.assertEqual(len(list((target / "outputs").glob("*.md"))), 5)
+            saved_text = "\n".join(path.read_text(encoding="utf-8") for path in target.rglob("*") if path.is_file())
+            self.assertNotIn("secret-test-token", saved_text)
+            self.assertNotIn("test-password", saved_text)
 
 
 if __name__ == "__main__":

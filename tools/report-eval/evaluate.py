@@ -165,7 +165,16 @@ def api_json(base_url, path, method="GET", payload=None, token=None):
         with opener.open(request, timeout=300) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        raise ValueError(f"ARTEX 本地接口返回 HTTP {exc.code}；检查登录状态和评测开关") from None
+        try:
+            error_body = json.loads(exc.read().decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            error_body = {}
+        if not isinstance(error_body, dict):
+            error_body = {}
+        message = error_body.get("error")
+        if isinstance(message, str) and message:
+            raise ValueError(f"ARTEX 本地接口返回 HTTP {exc.code}：{message}") from None
+        raise ValueError(f"ARTEX 本地接口返回 HTTP {exc.code}") from None
     except urllib.error.URLError as exc:
         raise ValueError("无法连接本机 ARTEX；确认容器正在运行且端口正确") from exc
 
@@ -228,43 +237,53 @@ def run_live(args):
         "policy_sha256": info.get("system_sha256"),
         "corpus_sha256": corpus,
         "results": {},
+        "failures": {},
     }
     write_json(target / "run.json", meta)
     try:
         for case in local_cases:
             cid = case["id"]
-            result = api_json(base_url, "/api/report-eval/" + urllib.parse.quote(cid, safe=""), method="POST", payload=None, token=token)
-            draft = result.get("draft")
-            if not isinstance(draft, dict) or not all(draft.get(key) for key in (
-                "cvss_vector", "description", "remediation", "test_process", "attack_chain", "discovery_path",
-            )):
-                raise ValueError(f"{cid} 的模型返回缺少必需报告字段；已保留此前完成的样本")
-            report = report_from_draft(case, draft)
-            if report.strip() == case["reference_report"].strip():
-                raise ValueError(f"{cid} 的生成内容与人工参考完全相同，拒绝记为模型产出")
-            write_json(target / "drafts" / f"{cid}.json", draft)
-            (target / "drafts" / f"{cid}.md").write_text(report, encoding="utf-8")
-            final_report = attach_evidence(case, report)
-            (target / "outputs" / f"{cid}.md").write_text(final_report, encoding="utf-8")
-            usage = result.get("usage", {})
-            meta["results"][cid] = {
-                "source": "model",
-                "output_file": f"outputs/{cid}.md",
-                "output_sha256": digest(final_report),
-                "draft_file": f"drafts/{cid}.md",
-                "draft_sha256": digest(report),
-                "input_tokens": usage.get("input_tokens"),
-                "output_tokens": usage.get("output_tokens"),
-                "cached_input_tokens": usage.get("cache_read_tokens"),
-                "duration_seconds": round(result.get("duration_ms", 0) / 1000, 3),
-                "provider_source": result.get("provider_source"),
-            }
-            write_json(target / "run.json", meta)
-            print(f"{cid} 完成：{usage.get('input_tokens', 0)} 输入 token，{usage.get('output_tokens', 0)} 输出 token，{result.get('duration_ms', 0) / 1000:.1f} 秒")
+            try:
+                result = api_json(base_url, "/api/report-eval/" + urllib.parse.quote(cid, safe=""), method="POST", payload=None, token=token)
+                draft = result.get("draft")
+                if not isinstance(draft, dict) or not all(draft.get(key) for key in (
+                    "cvss_vector", "description", "remediation", "test_process", "attack_chain", "discovery_path",
+                )):
+                    raise ValueError("模型返回缺少必需报告字段")
+                report = report_from_draft(case, draft)
+                if report.strip() == case["reference_report"].strip():
+                    raise ValueError("生成内容与人工参考完全相同，拒绝记为模型产出")
+                write_json(target / "drafts" / f"{cid}.json", draft)
+                (target / "drafts" / f"{cid}.md").write_text(report, encoding="utf-8")
+                final_report = attach_evidence(case, report)
+                (target / "outputs" / f"{cid}.md").write_text(final_report, encoding="utf-8")
+                usage = result.get("usage", {})
+                meta["results"][cid] = {
+                    "source": "model",
+                    "output_file": f"outputs/{cid}.md",
+                    "output_sha256": digest(final_report),
+                    "draft_file": f"drafts/{cid}.md",
+                    "draft_sha256": digest(report),
+                    "input_tokens": usage.get("input_tokens"),
+                    "output_tokens": usage.get("output_tokens"),
+                    "cached_input_tokens": usage.get("cache_read_tokens"),
+                    "duration_seconds": round(result.get("duration_ms", 0) / 1000, 3),
+                    "provider_source": result.get("provider_source"),
+                }
+                meta["failures"].pop(cid, None)
+                write_json(target / "run.json", meta)
+                print(f"{cid} 完成：{usage.get('input_tokens', 0)} 输入 token，{usage.get('output_tokens', 0)} 输出 token，{result.get('duration_ms', 0) / 1000:.1f} 秒")
+            except ValueError as exc:
+                meta["failures"][cid] = str(exc)
+                write_json(target / "run.json", meta)
+                print(f"{cid} 失败：{exc}")
     finally:
         token = ""
     write_json(target / "report-evaluation.json", review_run(target))
-    print(f"六个固定样本的模型输出已保存：{target}")
+    completed = len(meta["results"])
+    print(f"已生成 {completed}/{len(local_cases)} 个固定样本：{target}")
+    if meta["failures"]:
+        raise ValueError(f"{len(meta['failures'])} 个样本生成失败；结果和错误记录已保存")
 
 
 def read_policy(args):
@@ -479,7 +498,11 @@ def review_run(folder):
             raise ValueError(f"{cid} 的合成材料已变化；请用相同版本的材料重新准备评测")
         result = meta["results"].get(cid)
         if result is None:
-            output["cases"][cid] = {"status": "未收集模型输出"}
+            failure = meta.get("failures", {}).get(cid)
+            output["cases"][cid] = {
+                "status": "生成失败" if failure else "未收集模型输出",
+                "error": failure,
+            }
             continue
         # 只访问固定结果目录，run.json 不能指定仓库外文件。
         report = (target / "outputs" / f"{cid}.md").read_text(encoding="utf-8")
