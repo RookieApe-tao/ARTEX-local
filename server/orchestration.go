@@ -439,6 +439,9 @@ const previousFindingReportToolDescriptionTemplateV6 = "为已登记的漏洞一
 const previousDeliveryReportSaveGuidanceV7 = "交付报告须包含一个漏洞名称一级标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：" + agent.DeliveryReportSectionOrder + "。不要添加三级标题或重复栏目。测试过程须说明时间、实际工具与参数、结果、判据、失败尝试与未验证项；缺少时间或工具记录时分别写“测试时间：未记录”或“执行工具：未记录”。HTTP 问题须写明 Burp Repeater 的实际使用状态和复现步骤，非 HTTP 问题说明 Burp 不适用。已绑定 HTTP 请求和响应由 ARTEX 原文附加，不要重复粘贴。用简短中文写清问题、影响和修复。"
 const previousFindingReportToolDescriptionTemplateV7 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + previousDeliveryReportSaveGuidanceV7 + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
+const previousDeliveryReportSaveGuidanceV8 = "交付报告须包含一个漏洞名称一级标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：描述、修复建议、测试过程、攻击链路、证据说明。不要添加三级标题或重复栏目。测试过程必须各有一行“测试时间：”和“执行工具：”；没有记录时分别写“未记录”。还须说明参数、结果、判据、失败尝试与未验证项。HTTP 问题须写明 Burp Repeater 的实际使用状态；非 HTTP 问题只说明 Burp 不适用；协议未确认时写“协议未确认，Burp Repeater 复测未验证”，不猜协议也不写复现步骤。合成身份标记不是凭证，不要抄写或建议替换。已绑定 HTTP 请求和响应由 ARTEX 原文附加，不要重复粘贴。用简短中文写清问题、影响和修复。"
+const previousFindingReportToolDescriptionTemplateV8 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + previousDeliveryReportSaveGuidanceV8 + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
+
 const findingReportToolDescription = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + agent.DeliveryReportSaveGuidance + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
 func previousFindingReportToolDescriptions() []string {
@@ -451,6 +454,7 @@ func previousFindingReportToolDescriptions() []string {
 		previousFindingReportToolDescriptionTemplateV5,
 		previousFindingReportToolDescriptionTemplateV6,
 		previousFindingReportToolDescriptionTemplateV7,
+		previousFindingReportToolDescriptionTemplateV8,
 	}
 }
 
@@ -750,7 +754,8 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 		"66b2c31047b3b2ad974673d5cbf4462e4be4f0274b455876b5f51a5131bd151d", // 已知旧版改写标题与限制规则
 		"3f39e940b17ac4ac44ce9149863c0714d9ea7c84c3f3fa7c0fd65034f07629de", // 上一版内置 Reporter 默认提示词
 		"dde76414b475c7d51011383357e2b4709bcfa1a1454fa39c926f0812becf2256", // 固定五节默认提示词
-		"fa49ee7b606d0bdc5d12c4432b522fb07e7a4d7599286bd2acdffe32ff462a73": // 上一版固定模板默认提示词
+		"fa49ee7b606d0bdc5d12c4432b522fb07e7a4d7599286bd2acdffe32ff462a73", // 上一版固定模板默认提示词
+		"3103d7d553a88859aa582e8c9841cfbcd151caa03684d0746b9b0e2a3c0ffd6d": // 上一版五节简版默认提示词
 		return true
 	default:
 		return false
@@ -758,7 +763,7 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 }
 
 func (s *Server) upgradeReporterDeliveryTemplate() {
-	const flag = "reporter_prompt_delivery_template_v9"
+	const flag = "reporter_prompt_delivery_template_v10"
 	value, _, err := s.m.pg.GetSetting(flag)
 	if err != nil {
 		log.Printf("[reporter] 读取固定模板迁移标记失败: %v", err)
@@ -801,7 +806,7 @@ func (s *Server) upgradeReporterDeliveryTemplate() {
 			log.Printf("[reporter] 升级固定交付模板失败: %v", err)
 			return
 		}
-		log.Printf("[reporter] 默认 prompt 已升级为固定五节报告规范")
+		log.Printf("[reporter] 默认 prompt 已升级为精简交付报告规范")
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存固定模板 prompt 迁移标记失败: %v", err)
@@ -975,7 +980,13 @@ const reporterToolCallMessageV9 = "上面刚有一个漏洞被 report_finding �
 	"一次写出详细报告和交付报告。详细报告保留完整测试台账；交付报告只用固定的五节二级标题，不增加子标题，用短句说明问题、复现和修复。HTTP 测试在“测试过程”写明 Burp Repeater 实际使用状态和步骤；未实际使用时明确标为建议复测。ARTEX 会附加完整绑定报文，正文不重复粘贴。" +
 	"最后调用 update_finding_report(finding_id=finding_node_id, report, delivery_report, cvss_vector, evidence_version=实际读取的 version) 一次保存两份报告。"
 
-const reporterToolCallMessage = reporterToolCallMessageV9
+const reporterToolCallMessageV10 = "上面刚有一个漏洞被 report_finding 登记。请从返回 JSON 取得 finding_id（独立漏洞记录 ID）和 finding_node_id（探索节点 ID）。" +
+	"读取本漏洞节点、相关执行记录和原始证据。执行记录和报文优先于漏洞摘要、旧报告和 worker 总结；先整理成立条件、实际操作、观察结果、未验证影响和证据位置。" +
+	"一次写出详细报告和交付报告。详细报告保留完整工具参数、时间、失败记录、哈希和证据索引；交付报告按固定五节及其必需子标题撰写，只保留开发理解问题、复现和修复所需内容，不重复执行台账。时间用北京时间；仅在先后顺序或时间条件影响结论时保留准确时间。HTTP 测试在测试过程中写明 Burp Repeater 实际使用情况，未使用时给建议步骤并标记未验证。ARTEX 会在末尾附加已绑定的原始请求和响应，正文不重复粘贴。" +
+	"保存前由当前 Reporter 自查事实、复现条件、影响边界、攻击链和证据引用；不要补造缺失事实。只根据明确的格式错误作必要修正，不无限重试。" +
+	"最后调用 update_finding_report(finding_id=finding_node_id, report, delivery_report, cvss_vector, evidence_version=实际读取的 version) 一次保存两份报告。"
+
+const reporterToolCallMessage = reporterToolCallMessageV10
 
 // 旧版触发消息(0.3.8 及更早)。只有仍与它逐字相同的记录才会被迁移覆盖，用户改过的保持原样。
 const reporterToolCallMessageV1 = "上面刚有一个漏洞被 report_finding 登记。请从触发上下文里取出 finding_id" +
@@ -985,7 +996,7 @@ const reporterToolCallMessageV1 = "上面刚有一个漏洞被 report_finding �
 func reporterTriggerMessageNeedsUpgrade(message string) bool {
 	switch message {
 	case reporterToolCallMessageV1, reporterToolCallMessageV2, reporterToolCallMessageV2Legacy,
-		reporterToolCallMessageV3, reporterToolCallMessageV4, reporterToolCallMessageV5, reporterToolCallMessageV6, reporterToolCallMessageV7, reporterToolCallMessageV8:
+		reporterToolCallMessageV3, reporterToolCallMessageV4, reporterToolCallMessageV5, reporterToolCallMessageV6, reporterToolCallMessageV7, reporterToolCallMessageV8, reporterToolCallMessageV9:
 		return true
 	default:
 		return false
@@ -995,7 +1006,7 @@ func reporterTriggerMessageNeedsUpgrade(message string) bool {
 // Existing installations keep editable triggers, so only known stock messages
 // can receive new guidance without overwriting the user's workflow.
 func (s *Server) upgradeReporterTriggerMessage() {
-	const flag = "reporter_trigger_delivery_report_v9"
+	const flag = "reporter_trigger_delivery_report_v10"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}

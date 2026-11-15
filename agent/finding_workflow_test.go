@@ -131,21 +131,23 @@ func TestReportRuntimeGuidanceFollowsFinalPermissions(t *testing.T) {
 
 func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 	for _, required := range []string{
-		"详细报告保留完整测试台账",
-		"交付报告只写开发和业务人员理解问题、复现和修复所需的内容",
-		"请求与响应只能证明其中记录的内容",
-		"明确的未验证项优先于推测",
-		"没有检查源码或配置时，不猜代码位置、版本或实现方式",
-		"CVSS 向量、分数和等级只放在报告头",
-		"失败尝试只写已执行并有记录的操作",
-		"不要编造 Repeater 按钮、选项或并发能力",
-		"文件系统用语写“文件所有者”，不写“属主”",
+		"执行记录与原始材料优先于摘要和旧报告",
+		"没有找到撤销或恢复操作，不能据此写成无法恢复",
+		"详细报告保留完整台账，包括工具参数、时间、失败日志、哈希和证据索引",
+		"交付报告只保留开发理解问题、复现和修复所需的信息",
+		"时间统一在正文展示为北京时间",
+		"失败尝试只写确实执行过的记录",
+		"不得编造 Repeater 功能、并发控件或测试结果",
+		"ARTEX 会在报告末尾附加已绑定的完整 HTTP 请求和响应",
+		"保存前由同一 Reporter 自查",
 	} {
 		if !strings.Contains(DeliveryReportWritingRules, required) {
 			t.Fatalf("delivery report guidance is missing %q", required)
 		}
 	}
-	if strings.Contains(DeliveryReportWritingRules, "实际测试的工具与参数、发送顺序、判据和结果") {
-		t.Fatal("delivery report guidance still asks for a full execution ledger")
+	for _, forced := range []string{"测试过程必须各有一行“测试时间：”和“执行工具：”", "测试时间：未记录", "执行工具：未记录"} {
+		if strings.Contains(DeliveryReportWritingRules, forced) {
+			t.Fatalf("delivery report guidance still forces execution ledger fields: %q", forced)
+		}
 	}
 }

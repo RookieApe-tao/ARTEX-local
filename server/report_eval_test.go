@@ -176,7 +176,7 @@ func TestReportEvalPromptInputLabelsSyntheticMaterials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if nonHTTPInput["evidence_transport"] != "non-http" {
+	if nonHTTPInput["evidence_transport"] != "non_http" {
 		t.Fatalf("non-HTTP evidence transport=%q", nonHTTPInput["evidence_transport"])
 	}
 }
@@ -233,28 +233,29 @@ func TestReportEvalReturnsSafeCompletionFailureCategory(t *testing.T) {
 func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) {
 	prompt := deliveryReportCompletionSystem()
 	for _, required := range []string{
-		"不得改字段名、增加字段或输出解释文字",
-		"不添加三级标题",
-		"test_process 首行写“测试时间：YYYY-MM-DD HH:mm:ss（北京时间）”或“测试时间：未记录”",
-		"执行工具：未记录",
-		"按 evidence_transport 字段选择写法",
-		"测试标记（包括 X-Eval-Actor）不是身份凭证",
-		"不要建议转义、过滤或拒绝特殊字符",
-		"Burp Repeater”及实际使用状态",
-		"Burp Repeater 未实际使用，复测未验证",
-		"Repeater 串行重放不能证明并发",
-		"按 evidence_transport 字段选择写法",
-		"不要抄写标记名或建议替换标记",
-		"SQL 注入修复只建议参数化查询",
-		"只有状态码或响应头时，不得称为未鉴权接口或数据泄露",
-		"有 test_time_hint 时在“测试时间：”后按“YYYY-MM-DD HH:mm:ss（北京时间）”格式写一次",
-		"输入有 cvss_vector_hint 时照抄该值",
-		"输入有 recorded_failures 时须写明这些失败结果",
-		"若输入标明 synthetic=true、evidence_origin 或测试未在真实目标执行",
-		"只返回下列结构的 JSON 对象",
+		"不改字段名、不增加字段、不输出解释文字",
+		"平台会拼装报告标题、CVSS 信息、五个二级标题和原始证据附件",
+		"每个字段只返回对应章节的正文",
+		"只给一项有证据支持的主要改动",
+		"HTTP 问题的“Burp 复现”说明实际使用状态",
+		"### 定级依据",
+		"### 发现过程与攻击思路",
+		"### 失败尝试与未验证项",
+		"### Burp 复现",
+		"### 复测标准",
+		"保存前由同一 Reporter 自查",
+		"合成样本说明未测试真实目标",
+		"输入有 cvss_vector_hint 时原样使用",
+		"输入中的 recorded_failures 用于核对实际失败",
+		"只返回六个字符串字段组成的 JSON 对象",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("report completion prompt is missing %q", required)
+		}
+	}
+	for _, obsolete := range []string{"test_process 首行写", "执行工具：未记录", "按 evidence_transport 字段选择写法", "不添加三级标题", "测试时间：未记录"} {
+		if strings.Contains(prompt, obsolete) {
+			t.Fatalf("report completion prompt still forces execution-ledger content: %q", obsolete)
 		}
 	}
 }
@@ -268,7 +269,7 @@ func TestDeliveryReportCompletionUsesProvidedCVSSVectorHint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	modelDraft := `{"cvss_vector":"not-a-cvss-vector","description":"线索待核实。\n### 定级依据\n当前证据不足。","remediation":"先补齐响应正文。","test_process":"### 发现过程与攻击思路\n复核现有请求。\n### 失败尝试与未验证项\n文件内容未取得。","attack_chain":"用户 B 请求文件\n└─ 仅留存 HTTP 200 响应头","discovery_path":"### Burp 复现\nBurp 复测未验证。\n### 复测标准\n取得完整响应并比对文件。"}`
+	modelDraft := `{"cvss_vector":"not-a-cvss-vector","description":"线索待核实。\n### 定级依据\n当前证据不足。","remediation":"先补齐响应正文。","test_process":"### 发现过程与攻击思路\n复核现有请求。\n### 失败尝试与未验证项\n文件内容未取得。\n### Burp 复现\nBurp 复测未验证。","attack_chain":"用户 B 请求文件\n└─ 仅留存 HTTP 200 响应头","discovery_path":"来源为合成材料。\n### 复测标准\n取得完整响应并比对文件。"}`
 	draft, _, err := completeDeliveryReportWith(context.Background(), input, 0, func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
 		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock(modelDraft)}}, "end_turn", llm.Usage{}, nil
 	})
@@ -328,7 +329,7 @@ func TestEnsureDeliveryAttackChainTextFence(t *testing.T) {
 }
 
 func TestDeliveryReportDraftDisablesConfiguredResponsesReasoning(t *testing.T) {
-	modelDraft := `{"cvss_vector":"CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:L/SC:N/SI:L/SA:N","description":"问题描述。\n### 定级依据\n有可复核证据。","remediation":"在服务端校验资源归属。","test_process":"### 发现过程与攻击思路\n用 Burp Repeater 重放样本请求。\n### 失败尝试与未验证项\n批量编号未验证。","attack_chain":"普通用户\n└─ 修改请求\n   └─ 其他用户数据发生变化","discovery_path":"### Burp 复现\n将请求放入 Repeater。\n### 复测标准\n跨用户请求应被拒绝。"}`
+	modelDraft := `{"cvss_vector":"CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:L/SC:N/SI:L/SA:N","description":"问题描述。\n### 定级依据\n有可复核证据。","remediation":"在服务端校验资源归属。","test_process":"### 发现过程与攻击思路\n用 Burp Repeater 重放样本请求。\n### 失败尝试与未验证项\n批量编号未验证。\n### Burp 复现\n按授权账号复测。","attack_chain":"普通用户\n└─ 修改请求\n   └─ 其他用户数据发生变化","discovery_path":"来源为合成材料。\n### 复测标准\n跨用户请求应被拒绝。"}`
 	receivedCh := make(chan map[string]json.RawMessage, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {

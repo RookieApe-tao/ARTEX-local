@@ -18,17 +18,24 @@ from pathlib import Path
 
 CASE_DIR = Path(__file__).resolve().parent / "cases"
 HEADINGS = ["描述", "修复建议", "测试过程", "攻击链路", "证据说明"]
+SUBHEADINGS = [
+    ("描述", "定级依据"),
+    ("测试过程", "发现过程与攻击思路"),
+    ("测试过程", "失败尝试与未验证项"),
+    ("测试过程", "Burp 复现"),
+    ("证据说明", "复测标准"),
+]
 DIMENSIONS = ["事实准确", "容易理解", "可以复现", "影响边界", "修复具体"]
 INSTRUCTION = (
     "根据合成事实写一份面向开发的单漏洞交付报告。材料不对应真实服务，不得联网或执行目标测试。"
-    "只输出五节报告正文，不要复制请求、响应或终端原文；评测器会像 ARTEX 一样在报告末尾附加原始材料。"
-    "正文用具体操作和结果说明如何复现，保留测试时间、成立条件、失败尝试和未验证边界；时间统一写为 YYYY-MM-DD HH:mm:ss（北京时间），没有记录时写“测试时间：未记录”，不得补造。"
-    "测试过程必须各有一行测试时间和执行工具；没有工具记录时写“执行工具：未记录”。"
-    "只引用执行记录中实际使用的工具；有 test_tool_hint 时照录，没有时写“执行工具：未记录”。不要把建议复测工具写成已使用。"
+    "使用一个漏洞名称标题和一行 CVSS 4.0 信息，随后按顺序写五节：描述、修复建议、测试过程、攻击链路、证据说明。"
+    "描述含“定级依据”；测试过程含“发现过程与攻击思路”“失败尝试与未验证项”“Burp 复现”；证据说明含“复测标准”。"
+    "交付正文简短说明漏洞、影响、复现和修复；不要抄写请求、响应或终端原文，评测器会像 ARTEX 一样在报告末尾附加原始材料。"
+    "只记录材料中有依据的时间、工具、参数和结果；缺失信息不补造，未执行或未复现的项目标为未验证。"
     "账号、权限和会话形式只能使用材料明确记载的内容，不要新增账号或猜 Cookie、Token、认证头格式。"
     "只有状态码或响应头时不能称为未鉴权或数据泄露；证据不足时先补证，不直接下修复结论。真假条件响应差异不等于已提取数据。并发漏洞不得建议用 Repeater 串行发送证明并发。"
-    "HTTP 案例的测试过程必须逐字出现“Burp Repeater”。未实际使用时写“Burp Repeater 未实际使用，复测未验证”，并给出一条基于附加原始请求的建议复现步骤；并发结果说明真实并发工具，不能用 Repeater 串行重放证明。非 HTTP 案例只写“Burp 不适用”，不要提 Repeater。"
-    "X-Eval-Actor 是合成身份标记，不是凭证；不要写标记名或建议替换标记。真实复测应使用授权账号正常登录后分别捕获请求。SQL 注入只建议参数化查询，不建议转义、过滤或拒绝特殊字符；真假条件差异不能证明已读取或推断出数据库内容。"
+    "HTTP 案例在“Burp 复现”中给出基于附加请求的简短操作步骤和可观察判据，并区分实际测试与建议复测；没有 Burp 执行记录时明确标为未验证。并发问题说明真实并发方式，不能用 Repeater 串行重放证明。非 HTTP 案例说明 Burp 不适用。"
+    "X-Eval-Actor 是合成身份标记，不是凭证，不要把它写成真实账号或认证材料。修复建议只针对证据支持的根因，不猜源码路径或实现。"
     "攻击链只写简短中文树形内容，不要输出代码围栏、“text”标签、方括号标签或英文占位词。非 HTTP 案例只说明命令和输出，不得声称有 HTTP 请求或响应包。"
 )
 
@@ -482,7 +489,19 @@ def markdown_parts(report):
 
 def metrics(case, report):
     narrative, blocks, closed = markdown_parts(report)
-    headings = re.findall(r"^##\s+(.+?)\s*$", narrative, re.M)
+    # The platform appends raw evidence after the report body; it is outside the fixed template.
+    narrative = re.split(r"(?m)^### 原始材料\s*$", narrative, maxsplit=1)[0]
+    heading_rows = re.findall(r"^ {0,3}(#{1,6})\s+(.+?)\s*$", narrative, re.M)
+    headings = [text for marks, text in heading_rows if len(marks) == 2]
+    subheadings = []
+    section = ""
+    for marks, text in heading_rows:
+        if len(marks) == 2:
+            section = text
+        elif len(marks) == 3:
+            subheadings.append((section, text))
+    title_count = sum(1 for marks, _ in heading_rows if len(marks) == 1)
+    unexpected_heading_levels = [len(marks) for marks, _ in heading_rows if len(marks) > 3]
     normalized = report.replace("\r\n", "\n")
     preserved, missing = [], []
     for material in case["evidence"]:
@@ -501,6 +520,15 @@ def metrics(case, report):
         "narrative_characters": len(narrative),
         "headings": headings,
         "required_headings_ok": headings == HEADINGS,
+        "subheadings": subheadings,
+        "required_subheadings_ok": subheadings == SUBHEADINGS,
+        "report_structure_ok": (
+            title_count == 1
+            and headings == HEADINGS
+            and subheadings == SUBHEADINGS
+            and not unexpected_heading_levels
+        ),
+        "unexpected_heading_levels": unexpected_heading_levels,
         "fences_closed": closed,
         "code_blocks": len(blocks),
         "verbatim_material_found": preserved,

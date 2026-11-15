@@ -45,7 +45,12 @@ class ReportEvaluationTest(unittest.TestCase):
             self.prepare(folder)
             report_input = EVAL.read_json(folder / "inputs" / "idor.json")
             material = report_input["material"]
-            self.assertIn("Burp Repeater", report_input["instruction"])
+            instruction = report_input["instruction"]
+            self.assertIn("描述、修复建议、测试过程、攻击链路、证据说明", instruction)
+            self.assertIn("Burp 复现", instruction)
+            self.assertIn("缺失信息不补造", instruction)
+            self.assertNotIn("测试时间：未记录", instruction)
+            self.assertNotIn("必须逐字出现", instruction)
             self.assertNotIn("reference_report", material)
             self.assertNotIn("review", material)
             self.assertTrue(material["evidence"])
@@ -123,11 +128,25 @@ class ReportEvaluationTest(unittest.TestCase):
 
     def test_report_format_metrics_do_not_claim_semantic_quality(self):
         material = EVAL.cases()[0]
-        headings = "\n".join("## " + heading for heading in EVAL.HEADINGS)
-        report = headings + "\n```http\n## 报文中的标题不能成为正文标题\n```\n"
+        report = chr(10).join([
+            "# 漏洞名称",
+            "## 描述",
+            "### 定级依据",
+            "## 修复建议",
+            "## 测试过程",
+            "### 发现过程与攻击思路",
+            "### 失败尝试与未验证项",
+            "### Burp 复现",
+            "## 攻击链路",
+            "## 证据说明",
+            "### 复测标准",
+        ])
+        report = EVAL.attach_evidence(material, report)
         measured = EVAL.metrics(material, report)
         self.assertTrue(measured["required_headings_ok"])
-        self.assertTrue(measured["verbatim_material_not_found"])
+        self.assertTrue(measured["required_subheadings_ok"])
+        self.assertTrue(measured["report_structure_ok"])
+        self.assertFalse(measured["verbatim_material_not_found"])
         self.assertIn("未自动判定", measured["semantic_quality"])
 
     def test_live_evaluation_only_accepts_loopback_and_renders_cvss_header(self):
