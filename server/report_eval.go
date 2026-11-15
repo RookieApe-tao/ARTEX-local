@@ -104,7 +104,15 @@ func (s *Server) runReportEvalCase(w http.ResponseWriter, r *http.Request) {
 		}
 		var outputErr *deliveryReportOutputError
 		if errors.As(err, &outputErr) {
-			writeJSON(w, status, map[string]string{"error": message, "raw_output": outputErr.raw})
+			writeJSON(w, status, map[string]any{
+				"error":      message,
+				"raw_output": outputErr.raw,
+				"diagnostic": map[string]any{
+					"stop_reason":         outputErr.stopReason,
+					"content_block_types": outputErr.contentBlockType,
+					"output_tokens":       outputErr.outputTokens,
+				},
+			})
 			return
 		}
 		writeErr(w, status, message)

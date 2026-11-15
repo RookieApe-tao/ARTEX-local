@@ -164,6 +164,13 @@ func TestReportEvalReturnsSafeCompletionFailureCategory(t *testing.T) {
 			if tt.wantRaw != "" && !strings.Contains(response.Body.String(), tt.wantRaw) {
 				t.Fatalf("body=%s, want fixed-sample model output %q", response.Body.String(), tt.wantRaw)
 			}
+			if tt.name == "invalid JSON" {
+				for _, want := range []string{`"stop_reason":"end_turn"`, `"content_block_types":["text"]`, `"output_tokens":23`} {
+					if !strings.Contains(response.Body.String(), want) {
+						t.Fatalf("body=%s, missing safe model diagnostic %q", response.Body.String(), want)
+					}
+				}
+			}
 			if tt.mustHide != "" && strings.Contains(response.Body.String(), tt.mustHide) {
 				t.Fatalf("response leaked provider error detail: %s", response.Body.String())
 			}

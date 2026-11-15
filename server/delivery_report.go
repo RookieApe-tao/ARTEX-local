@@ -33,8 +33,11 @@ var (
 )
 
 type deliveryReportOutputError struct {
-	cause error
-	raw   string
+	cause            error
+	raw              string
+	stopReason       string
+	contentBlockType []string
+	outputTokens     int
 }
 
 func (e *deliveryReportOutputError) Error() string { return e.cause.Error() }
@@ -244,7 +247,7 @@ func completeDeliveryReportWith(
 	if err != nil {
 		return deliveryReportDraft{}, llm.Usage{}, err
 	}
-	message, _, usage, err := complete(ctx, llm.CompletionRequest{
+	message, stopReason, usage, err := complete(ctx, llm.CompletionRequest{
 		System: []string{deliveryReportCompletionSystem()}, Messages: []llm.Message{llm.UserText(string(raw))}, MaxTokens: 4096, Thinking: "disabled",
 	})
 	if err != nil {
@@ -254,9 +257,16 @@ func completeDeliveryReportWith(
 	text = strings.TrimPrefix(text, "```json")
 	text = strings.TrimPrefix(text, "```")
 	text = strings.TrimSuffix(strings.TrimSpace(text), "```")
+	contentBlockTypes := make([]string, 0, len(message.Content))
+	for _, block := range message.Content {
+		contentBlockTypes = append(contentBlockTypes, string(block.Type))
+	}
 	var draft deliveryReportDraft
 	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &draft); err != nil {
-		return deliveryReportDraft{}, usage, &deliveryReportOutputError{cause: errDeliveryReportInvalidJSON, raw: text}
+		return deliveryReportDraft{}, usage, &deliveryReportOutputError{
+			cause: errDeliveryReportInvalidJSON, raw: text, stopReason: stopReason,
+			contentBlockType: contentBlockTypes, outputTokens: usage.OutputTokens,
+		}
 	}
 	draft.Description = strings.TrimSpace(draft.Description)
 	draft.Remediation = strings.TrimSpace(draft.Remediation)
@@ -265,7 +275,10 @@ func completeDeliveryReportWith(
 	draft.DiscoveryPath = strings.TrimSpace(draft.DiscoveryPath)
 	if draft.Description == "" || draft.Remediation == "" || draft.TestProcess == "" ||
 		draft.AttackChain == "" || draft.DiscoveryPath == "" {
-		return deliveryReportDraft{}, usage, &deliveryReportOutputError{cause: errDeliveryReportMissingBody, raw: text}
+		return deliveryReportDraft{}, usage, &deliveryReportOutputError{
+			cause: errDeliveryReportMissingBody, raw: text, stopReason: stopReason,
+			contentBlockType: contentBlockTypes, outputTokens: usage.OutputTokens,
+		}
 	}
 	draft.EvidenceVersion = evidenceVersion
 	return draft, usage, nil

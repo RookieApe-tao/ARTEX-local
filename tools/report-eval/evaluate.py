@@ -173,10 +173,12 @@ def api_json(base_url, path, method="GET", payload=None, token=None):
             error_body = {}
         message = error_body.get("error")
         raw_output = error_body.get("raw_output")
+        diagnostic = error_body.get("diagnostic")
         raise ReportEvalHTTPError(
             exc.code,
             message if isinstance(message, str) else "",
             raw_output if isinstance(raw_output, str) else "",
+            diagnostic,
         ) from None
     except urllib.error.URLError as exc:
         raise ValueError("无法连接本机 ARTEX；确认容器正在运行且端口正确") from exc
@@ -188,13 +190,14 @@ class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 class ReportEvalHTTPError(ValueError):
-    def __init__(self, status, message, raw_output=""):
+    def __init__(self, status, message, raw_output="", diagnostic=None):
         if message:
             message = f"ARTEX 本地接口返回 HTTP {status}：{message}"
         else:
             message = f"ARTEX 本地接口返回 HTTP {status}"
         super().__init__(message)
         self.raw_output = raw_output
+        self.diagnostic = diagnostic if isinstance(diagnostic, dict) else {}
 
 
 def run_live(args):
@@ -217,7 +220,7 @@ def run_live(args):
         raise ValueError("运行中的固定样本与本地评测材料不一致")
     model = info.get("model") or "未返回模型标识"
     target.mkdir(parents=True)
-    for folder in ("inputs", "drafts", "outputs", "raw-responses", "reviews"):
+    for folder in ("inputs", "drafts", "outputs", "raw-responses", "diagnostics", "reviews"):
         (target / folder).mkdir()
     corpus = {}
     for case in local_cases:
@@ -290,6 +293,8 @@ def run_live(args):
                 meta["failures"][cid] = str(exc)
                 if isinstance(exc, ReportEvalHTTPError) and exc.raw_output:
                     (target / "raw-responses" / f"{cid}.txt").write_text(exc.raw_output, encoding="utf-8")
+                if isinstance(exc, ReportEvalHTTPError) and exc.diagnostic:
+                    write_json(target / "diagnostics" / f"{cid}.json", exc.diagnostic)
                 write_json(target / "run.json", meta)
                 print(f"{cid} 失败：{exc}")
     finally:

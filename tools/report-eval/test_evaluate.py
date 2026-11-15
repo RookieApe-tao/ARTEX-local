@@ -154,12 +154,17 @@ class ReportEvaluationTest(unittest.TestCase):
             502,
             "Bad Gateway",
             {},
-            io.BytesIO('{"error":"模型报告字段不完整"}'.encode()),
+            io.BytesIO(
+                '{"error":"模型报告字段不完整","diagnostic":{"stop_reason":"end_turn",'
+                '"content_block_types":["text"],"output_tokens":17}}'.encode()
+            ),
         )
         with patch.object(EVAL.urllib.request, "build_opener") as build_opener:
             build_opener.return_value.open.side_effect = error
-            with self.assertRaisesRegex(ValueError, "模型报告字段不完整"):
+            with self.assertRaises(EVAL.ReportEvalHTTPError) as raised:
                 EVAL.api_json("http://127.0.0.1:8787", "/api/report-eval/idor")
+            self.assertIn("模型报告字段不完整", str(raised.exception))
+            self.assertEqual(raised.exception.diagnostic["content_block_types"], ["text"])
 
     def test_live_evaluation_continues_and_records_other_case_failures(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -180,7 +185,12 @@ class ReportEvaluationTest(unittest.TestCase):
                 case_id = path.rsplit("/", 1)[-1]
                 calls.append(case_id)
                 if case_id == "concurrency":
-                    raise EVAL.ReportEvalHTTPError(502, "模型未返回可解析的报告字段", "not-json output")
+                    raise EVAL.ReportEvalHTTPError(
+                        502,
+                        "模型未返回可解析的报告字段",
+                        "not-json output",
+                        {"stop_reason": "end_turn", "content_block_types": ["text"], "output_tokens": 17},
+                    )
                 case = EVAL.cases_by_id()[case_id]
                 return {
                     "draft": {
@@ -210,6 +220,7 @@ class ReportEvaluationTest(unittest.TestCase):
             self.assertEqual(evaluation["cases"]["concurrency"]["status"], "生成失败")
             self.assertEqual(len(list((target / "outputs").glob("*.md"))), 5)
             self.assertEqual((target / "raw-responses" / "concurrency.txt").read_text(), "not-json output")
+            self.assertEqual(EVAL.read_json(target / "diagnostics" / "concurrency.json")["stop_reason"], "end_turn")
             saved_text = "\n".join(path.read_text(encoding="utf-8") for path in target.rglob("*") if path.is_file())
             self.assertNotIn("secret-test-token", saved_text)
             self.assertNotIn("test-password", saved_text)
