@@ -102,15 +102,18 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if len(provider.request.System) != 1 || !strings.Contains(provider.request.System[0], "保存前由同一 Reporter 检查") {
 		t.Fatal("report generation call did not receive the same-Reporter self-check instructions")
 	}
-	if strings.Count(provider.request.System[0], agent.DeliveryReportWritingRules) != 1 {
-		t.Fatal("compatibility draft generation duplicated the shared writing rules")
+	if strings.Count(provider.request.System[0], agent.DeliveryReportDraftRules) != 1 {
+		t.Fatal("compatibility draft generation must use the dedicated JSON draft rules once")
+	}
+	if strings.Contains(provider.request.System[0], "# 系统或模块 功能或接口 缺陷：实际后果") {
+		t.Fatal("JSON draft instructions must not also require a full Markdown report")
 	}
 	for _, staleRule := range []string{"并发漏洞须使用并发工具或脚本验证", "把过滤或拒绝特殊字符列为修复", "文件名、所有者名称和权限位不能单独证明文件内容敏感", "已知入口"} {
 		if strings.Contains(provider.request.System[0], staleRule) {
 			t.Fatalf("compatibility draft generation retained superseded guidance %q", staleRule)
 		}
 	}
-	for _, rule := range []string{"不得建议替换认证字段", "回读查询与各次请求结果分支对齐", "SQL 真假常量", "未证明内容敏感时不写信息泄露", "不得另行给出冲突的危害等级"} {
+	for _, rule := range []string{"不得建议替换认证字段", "回读查询与各次请求结果分支对齐", "SQL 真假常量", "未证明内容敏感时不写信息泄露", "CVSS 向量、分数和等级保持一致"} {
 		if !strings.Contains(provider.request.System[0], rule) {
 			t.Fatalf("report generation instructions omitted rule %q", rule)
 		}
@@ -251,18 +254,16 @@ func TestReportEvalReturnsSafeCompletionFailureCategory(t *testing.T) {
 func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) {
 	prompt := deliveryReportCompletionSystem()
 	for _, required := range []string{
-		"本次只生成报告草稿，不调用工具",
-		"平台负责生成标题、CVSS 行、五节标题和原始证据附件",
-		"每个字段只填对应章节正文",
-		"只返回以下 JSON 对象",
-		"description 必须包含“### 定级依据”及其正文",
-		"test_process 必须按顺序包含“### 发现过程与攻击思路”“### 失败尝试与未验证项”“### Burp 复现”",
-		"discovery_path 必须包含“### 复测标准”及正文",
-		"attack_chain 只写简短中文树形节点",
-		"不得写 Markdown 标题、完整 HTTP 头或请求正文",
-		"HTTP 链路节点必须保留证据中的 METHOD 和 path",
-		"链路只概括入口、关键操作和观察结果",
-		"非 HTTP 样本从已留存命令开始，不把进程身份改写成登录过程",
+		"本次只生成交付报告草稿，不调用工具",
+		"平台生成标题、CVSS 行、五节标题和原始报文附件",
+		"只返回这个 JSON 对象",
+		"description 先写问题，再依次包含“### 定级依据”和依据正文",
+		"test_process 依次包含“### 发现过程与攻击思路”“### 失败尝试与未验证项”“### Burp 复现”",
+		"discovery_path 包含“### 复测标准”和正文",
+		"attack_chain 只写简短树形节点",
+		"不写请求头或正文",
+		"HTTP 节点保留原始 METHOD 和 path",
+		"平台会添加 text 代码围栏",
 		"### 定级依据",
 		"### 发现过程与攻击思路",
 		"### 失败尝试与未验证项",
@@ -271,14 +272,103 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"保存前由同一 Reporter 检查",
 		"报告必须说明是合成测试",
 		"未证明内容敏感时不写信息泄露",
-		"并发问题说明 Repeater 串行重放不能证明并发",
+		"Repeater 串行重放不能验证并发",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("report completion prompt is missing %q", required)
 		}
 	}
-	if strings.Count(prompt, agent.DeliveryReportWritingRules) != 1 {
-		t.Fatal("compatibility draft generation must inject the shared writing rules once")
+	if strings.Count(prompt, agent.DeliveryReportDraftRules) != 1 || strings.Contains(prompt, agent.DeliveryReportWritingRules) {
+		t.Fatal("compatibility draft generation must use only its dedicated draft rules")
+	}
+}
+
+func TestDeliveryReportMarkdownFallbackParsesFullModelReport(t *testing.T) {
+	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
+	markdown := `# 测试系统 越权修改：普通用户可修改他人配置
+CVSS 4.0：` + vector + ` 评分 6.1（中）
+
+## 描述
+普通用户可修改其他用户的配置。
+### 定级依据
+已观察到完整性影响。
+
+## 修复建议
+服务端校验作业归属后再更新配置。
+
+## 测试过程
+### 发现过程与攻击思路
+普通用户重放更新请求并回读配置。
+### 失败尝试与未验证项
+未测试其他作业状态。
+### Burp 复现
+本次未使用 Burp Repeater；复测未验证。
+
+## 攻击链路
+普通用户
+└─ POST /api/jobs/job-a/types
+   └─ 配置发生变化
+
+## 证据说明
+材料来自固定合成样本。
+### 复测标准
+非所有者请求被拒绝且配置不变。`
+	input := map[string]string{"cvss_vector_hint": vector}
+	draft, usage, err := completeDeliveryReportWith(context.Background(), input, 4, func(_ context.Context, request llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+		if len(request.Tools) != 0 {
+			t.Fatalf("fallback request exposed %d tools", len(request.Tools))
+		}
+		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock(markdown)}}, "end_turn", llm.Usage{OutputTokens: 80}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.OutputTokens != 80 || draft.CVSSVector != vector || draft.EvidenceVersion != 4 {
+		t.Fatalf("metadata lost during Markdown fallback: usage=%+v draft=%+v", usage, draft)
+	}
+	for _, value := range []string{draft.Description, draft.Remediation, draft.TestProcess, draft.DiscoveryPath} {
+		if strings.TrimSpace(value) == "" {
+			t.Fatal("Markdown fallback returned an empty report field")
+		}
+	}
+	if !strings.HasPrefix(draft.AttackChain, "```text\n") || !strings.Contains(draft.AttackChain, "POST /api/jobs/job-a/types") {
+		t.Fatalf("Markdown fallback did not preserve and fence the attack chain: %s", draft.AttackChain)
+	}
+}
+
+func TestDeliveryReportDraftMovesRequiredSubheadingsToOwnLines(t *testing.T) {
+	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
+	raw, err := json.Marshal(deliveryReportDraft{
+		CVSSVector:    vector,
+		Description:   "普通用户可修改作业。### 定级依据\n现有材料显示配置已变化。",
+		Remediation:   "服务端校验作业归属。",
+		TestProcess:   "步骤。### 发现过程与攻击思路\n重放修改请求。### 失败尝试与未验证项\n没有记录失败尝试。### Burp 复现\nBurp 复测未验证。",
+		AttackChain:   "普通用户\n└─ POST /api/jobs/job-a/types\n   └─ 配置改变",
+		DiscoveryPath: "证据来自固定样本。### 复测标准\n非所有者请求被拒绝，作业配置保持不变。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := parseDeliveryReportDraft(llm.Message{Content: []llm.ContentBlock{llm.TextBlock(string(raw))}}, "end_turn", llm.Usage{}, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{draft.Description, draft.TestProcess, draft.DiscoveryPath} {
+		if strings.Contains(value, "。### ") {
+			t.Fatalf("subheading remained attached to prose: %q", value)
+		}
+	}
+	report := strings.Join([]string{
+		"# 测试系统 作业越权",
+		"CVSS 4.0：" + vector + " 评分 待复核（待复核）",
+		"## 描述\n\n" + draft.Description,
+		"## 修复建议\n\n" + draft.Remediation,
+		"## 测试过程\n\n" + draft.TestProcess,
+		"## 攻击链路\n\n" + draft.AttackChain,
+		"## 证据说明\n\n" + draft.DiscoveryPath,
+	}, "\n\n")
+	if err := validateDeliveryReportTemplate(report, vector); err != nil {
+		t.Fatalf("normalized draft does not meet the report template: %v", err)
 	}
 }
 
@@ -419,7 +509,7 @@ func TestDeliveryReportDraftDisablesConfiguredResponsesReasoning(t *testing.T) {
 	if request.Reasoning.Effort != "none" {
 		t.Fatalf("Responses API reasoning effort=%q, want none", request.Reasoning.Effort)
 	}
-	if !strings.Contains(request.Instructions, "保存前由同一 Reporter 自查") {
+	if !strings.Contains(request.Instructions, "保存前由同一 Reporter 检查") {
 		t.Fatal("report request did not include the same-Reporter self-check rules")
 	}
 	if draft.Description == "" || usage.OutputTokens != 420 {

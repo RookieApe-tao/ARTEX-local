@@ -337,7 +337,9 @@ def read_policy(args):
 def expand_go_policy(source):
     allowed = {
         "DeliveryReportWritingRules",
+        "DeliveryReportDraftRules",
         "DeliveryReportRuntimeGuidance",
+        "DeliveryReportHardCaseGuidance",
         "DeliveryReportStyleGuidance",
     }
 
@@ -377,7 +379,10 @@ def expand_go_policy(source):
             raise ValueError("写作规则包含不支持的 Go 表达式，请明确导出纯文本规则")
         return "".join(terms)
 
-    return expand("DeliveryReportWritingRules", set())
+    target = "DeliveryReportDraftRules"
+    if not re.search(r"(?m)^const\s+" + re.escape(target) + r"\s*=", source):
+        target = "DeliveryReportWritingRules"
+    return expand(target, set())
 
 
 def prepare(args):
@@ -635,7 +640,7 @@ def main():
     prepare_cmd = commands.add_parser("prepare", help="准备不含参考答案的模型输入及人工评分表")
     policy = prepare_cmd.add_mutually_exclusive_group(required=True)
     policy.add_argument("--policy-file", help="明确指定纯文本写作规则文件，不读取运行配置")
-    policy.add_argument("--policy-source", help="从 Go 源码的 DeliveryReportWritingRules 原始字符串提取规则")
+    policy.add_argument("--policy-source", help="提取 Go 源码中的草稿规则（旧源码回退到 DeliveryReportWritingRules）")
     prepare_cmd.add_argument("--label", required=True)
     prepare_cmd.add_argument("--model", required=True)
     prepare_cmd.add_argument("--temperature", type=nonnegative_float)

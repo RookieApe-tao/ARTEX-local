@@ -129,6 +129,15 @@ func TestReportRuntimeGuidanceFollowsFinalPermissions(t *testing.T) {
 	}
 }
 
+func TestReporterDefaultPromptUsesMarkdownRulesWithoutJSONContract(t *testing.T) {
+	if strings.Count(ReporterDefaultPrompt, DeliveryReportWritingRules) != 1 {
+		t.Fatal("Reporter default must include the Markdown writing rules exactly once")
+	}
+	if strings.Contains(ReporterDefaultPrompt, `"cvss_vector":""`) || strings.Contains(ReporterDefaultPrompt, "description 先写问题") {
+		t.Fatal("Reporter default must not include the compatibility endpoint's JSON draft contract")
+	}
+}
+
 func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 	for _, required := range []string{
 		"摘要和旧报告只用于找材料",
@@ -151,10 +160,6 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 		"重复写入只建议数据库唯一约束",
 		"交付正文最多 800 字符",
 		"平台附加的完整报文不重抄",
-		"生成结构化草稿时，JSON 的 description 字段必须按",
-		"test_process 字段必须依次包含",
-		"discovery_path 字段必须包含",
-		"攻击链字段只写简短的中文树形节点",
 		"终端样本中，id 命令只能说明当前进程身份",
 		"保存前由同一 Reporter 检查",
 	} {
@@ -166,5 +171,8 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 		if strings.Contains(DeliveryReportWritingRules, forced) {
 			t.Fatalf("delivery report guidance still forces execution ledger fields: %q", forced)
 		}
+	}
+	if strings.Contains(DeliveryReportWritingRules, "JSON 的 description 字段") || !strings.Contains(DeliveryReportDraftRules, "description 先写问题") {
+		t.Fatal("JSON draft format rules must stay separate from the full Markdown Reporter rules")
 	}
 }

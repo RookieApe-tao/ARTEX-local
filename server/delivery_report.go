@@ -237,16 +237,7 @@ func (s *Server) completeDeliveryReport(ctx context.Context, access deliveryRepo
 }
 
 func deliveryReportCompletionSystem() string {
-	return agent.DeliveryReportWritingRules + `
-
-本次只生成报告草稿，不调用工具。平台负责生成标题、CVSS 行、五节标题和原始证据附件。每个字段只填对应章节正文，不重复完整标题、CVSS 行或其他章节内容。
-只返回以下 JSON 对象，不加代码围栏、解释文字或其他字段；所有字段均为字符串且不能为空：
-{"cvss_vector":"","description":"","remediation":"","test_process":"","attack_chain":"","discovery_path":""}
-description 必须包含“### 定级依据”及其正文；test_process 必须按顺序包含“### 发现过程与攻击思路”“### 失败尝试与未验证项”“### Burp 复现”及各自正文；discovery_path 必须包含“### 复测标准”及正文。
-attack_chain 只写简短中文树形节点，从材料可定位的请求或命令开始；不得写 Markdown 标题、完整 HTTP 头或请求正文。并列操作放在同一父节点下，每个结果对应实际操作。非 HTTP 样本从已留存命令开始，不把进程身份改写成登录过程。
-HTTP 链路节点必须保留证据中的 METHOD 和 path；不要把请求标头、请求正文、整段测试步骤搬进树中。链路只概括入口、关键操作和观察结果，不重复测试过程里的参数与失败记录。
-各章节按共享写作规范控制长度，整份交付正文不超过 800 字符。
-`
+	return agent.DeliveryReportDraftRules
 }
 
 func stripDeliveryDraftSectionHeading(content, section string) string {
@@ -262,6 +253,43 @@ func stripDeliveryDraftSectionHeading(content, section string) string {
 		lines = lines[1:]
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func normalizeDeliveryDraftSubheadings(content string, headings ...string) string {
+	for _, heading := range headings {
+		marker := "### " + heading
+		position := -1
+		scanDeliveryMarkdown(content, func(line string, offset int, code bool) {
+			if position >= 0 || code {
+				return
+			}
+			level, title := deliveryMarkdownHeading(line)
+			if level == 3 && title == heading {
+				return
+			}
+			index := strings.Index(line, marker)
+			if index < 0 {
+				return
+			}
+			boundary := index + len(marker)
+			if boundary < len(line) && line[boundary] != ' ' && line[boundary] != '\t' {
+				return
+			}
+			position = offset + index
+		})
+		if position < 0 {
+			continue
+		}
+		if position > 0 && content[position-1] != '\n' {
+			content = content[:position] + "\n\n" + content[position:]
+			position += 2
+		}
+		afterMarker := position + len(marker)
+		if afterMarker < len(content) && content[afterMarker] != '\n' && content[afterMarker] != '\r' {
+			content = content[:afterMarker] + "\n" + content[afterMarker:]
+		}
+	}
+	return strings.TrimSpace(content)
 }
 
 func ensureDeliveryAttackChainTextFence(content string) string {
@@ -435,9 +463,13 @@ func parseDeliveryReportDraft(
 	}
 	var draft deliveryReportDraft
 	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &draft); err != nil {
-		return deliveryReportDraft{}, &deliveryReportOutputError{
-			cause: errDeliveryReportInvalidJSON, raw: text, stopReason: stopReason,
-			contentBlockType: contentBlockTypes, outputTokens: usage.OutputTokens,
+		if markdownDraft, ok := parseDeliveryReportMarkdownDraft(text); ok {
+			draft = markdownDraft
+		} else {
+			return deliveryReportDraft{}, &deliveryReportOutputError{
+				cause: errDeliveryReportInvalidJSON, raw: text, stopReason: stopReason,
+				contentBlockType: contentBlockTypes, outputTokens: usage.OutputTokens,
+			}
 		}
 	}
 	if hint := strings.TrimSpace(input["cvss_vector_hint"]); hint != "" {
@@ -445,6 +477,9 @@ func parseDeliveryReportDraft(
 			draft.CVSSVector = vector
 		}
 	}
+	draft.Description = normalizeDeliveryDraftSubheadings(draft.Description, "定级依据")
+	draft.TestProcess = normalizeDeliveryDraftSubheadings(draft.TestProcess, "发现过程与攻击思路", "失败尝试与未验证项", "Burp 复现")
+	draft.DiscoveryPath = normalizeDeliveryDraftSubheadings(draft.DiscoveryPath, "复测标准")
 	draft.Description = stripDeliveryDraftSectionHeading(draft.Description, "描述")
 	draft.Remediation = stripDeliveryDraftSectionHeading(draft.Remediation, "修复建议")
 	draft.Remediation = stripDeliveryDraftSectionHeading(draft.Remediation, "修复")
@@ -461,6 +496,92 @@ func parseDeliveryReportDraft(
 	}
 	draft.EvidenceVersion = evidenceVersion
 	return draft, nil
+}
+
+func parseDeliveryReportMarkdownDraft(raw string) (deliveryReportDraft, bool) {
+	text := strings.TrimSpace(raw)
+	if strings.HasPrefix(text, "```") && strings.HasSuffix(text, "```") {
+		lines := strings.Split(text, "\n")
+		if len(lines) >= 3 {
+			first := strings.TrimSpace(lines[0])
+			last := strings.TrimSpace(lines[len(lines)-1])
+			if strings.HasPrefix(first, "```") && last == "```" {
+				lines = lines[1 : len(lines)-1]
+				if strings.TrimSpace(lines[0]) == "markdown" || strings.TrimSpace(lines[0]) == "md" {
+					lines = lines[1:]
+				}
+				text = strings.Join(lines, "\n")
+			}
+		}
+	}
+
+	type section struct {
+		name      string
+		start     int
+		headingAt int
+	}
+	aliases := map[string]string{
+		"描述": "描述", "漏洞描述": "描述",
+		"修复": "修复建议", "修复建议": "修复建议",
+		"测试过程": "测试过程", "攻击链路": "攻击链路", "证据说明": "证据说明",
+	}
+	sections := make([]section, 0, 5)
+	valid := true
+	closed := walkDeliveryMarkdown(text, func(line string, offset int) {
+		level, heading := deliveryMarkdownHeading(line)
+		if level != 2 {
+			return
+		}
+		name, known := aliases[heading]
+		if !known {
+			valid = false
+			return
+		}
+		start := offset + len(line)
+		if start < len(text) && text[start] == '\r' {
+			start++
+		}
+		if start < len(text) && text[start] == '\n' {
+			start++
+		}
+		sections = append(sections, section{name: name, start: start, headingAt: offset})
+	})
+	if !valid || !closed || len(sections) != 5 {
+		return deliveryReportDraft{}, false
+	}
+	expected := []string{"描述", "修复建议", "测试过程", "攻击链路", "证据说明"}
+	for index, section := range sections {
+		if section.name != expected[index] || (index > 0 && section.headingAt <= sections[index-1].headingAt) {
+			return deliveryReportDraft{}, false
+		}
+	}
+	body := func(index int) string {
+		end := len(text)
+		if index+1 < len(sections) {
+			end = sections[index+1].headingAt
+		}
+		return strings.TrimSpace(text[sections[index].start:end])
+	}
+	draft := deliveryReportDraft{
+		Description:   body(0),
+		Remediation:   body(1),
+		TestProcess:   body(2),
+		AttackChain:   body(3),
+		DiscoveryPath: body(4),
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if index := strings.Index(line, "CVSS:4.0/"); index >= 0 {
+			fields := strings.Fields(line[index:])
+			if len(fields) > 0 {
+				candidate := strings.TrimRight(fields[0], "，,。；;`*_)")
+				if vector, ok := normalizeCVSS4BaseVector(candidate); ok {
+					draft.CVSSVector = vector
+					break
+				}
+			}
+		}
+	}
+	return draft, true
 }
 
 func (s *Server) deliveryTrafficPackets(bindings []db.FindingTrafficBinding) (string, string, error) {

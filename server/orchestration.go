@@ -593,15 +593,17 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedWorkerReadbackRebind()  // 修复旧迁移误删：把 search_all_worker_traces/get_worker_trace/node_detail 补绑回 worker(一次性)
 	s.seedAutoReportFindingBinding()
 	s.unbindGoalMetDefault()
-	s.reseedGoalsPrompt()               // goals 提示词加入「抽操作约束」步 → 旧库追加一版新默认(一次性)
-	s.reseedMainAgentPrompt()           // mainagent 提示词加入「目标达成后 add_intent 反问是否建目标」(一次性)
-	s.upgradeVerificationPrompts()      // 仅替换仍为旧默认值的提示词
-	s.seedReporterAgent()               // 预置「报告撰写」agent + 工具绑定 + finding 触发器(一次性)
-	s.upgradeReporterDefaultPrompt()    // 老库默认 prompt 增加交付报告，保留用户自定义版本
-	s.upgradeReporterDefaultPromptV3()  // 默认报告使用真人可读内容并自动附加原始报文
-	s.upgradeReporterDeliveryTemplate() // 默认交付报告升级为真人可读标题和链路图规范
-	s.upgradeReporterTriggerMessage()   // 老库触发消息同步报告版式与链路图规范
-	s.seedFindingTrafficTools()         // 增加可选证据参数及只读证据工具，保留用户配置
+	s.reseedGoalsPrompt()                  // goals 提示词加入「抽操作约束」步 → 旧库追加一版新默认(一次性)
+	s.reseedMainAgentPrompt()              // mainagent 提示词加入「目标达成后 add_intent 反问是否建目标」(一次性)
+	s.upgradeVerificationPrompts()         // 仅替换仍为旧默认值的提示词
+	s.seedReporterAgent()                  // 预置「报告撰写」agent + 工具绑定 + finding 触发器(一次性)
+	s.upgradeReporterDefaultPrompt()       // 老库默认 prompt 增加交付报告，保留用户自定义版本
+	s.upgradeReporterDefaultPromptV3()     // 默认报告使用真人可读内容并自动附加原始报文
+	s.upgradeReporterDeliveryTemplate()    // 默认交付报告升级为真人可读标题和链路图规范
+	s.upgradeReporterDeliveryTemplateV17() // 分离 Markdown 报告与 JSON 草稿规则，避免格式指令冲突
+	s.upgradeReporterTriggerMessage()      // 老库触发消息同步报告版式与链路图规范
+	s.upgradeReporterTriggerMessageV11()   // 移除触发消息中重复的报告写作规则
+	s.seedFindingTrafficTools()            // 增加可选证据参数及只读证据工具，保留用户配置
 	s.seedFindingWorkflowTools()
 	// 注：pentest 的默认工具绑定无需迁移——BuiltinToolSeeds 在全新初始化时就把
 	// list_assets/insert_assets/report_finding/list_findings/list_companies 连同
@@ -746,7 +748,11 @@ func (s *Server) upgradeReporterDefaultPromptV3() {
 }
 
 func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
-	switch fmt.Sprintf("%x", sha256.Sum256([]byte(prompt))) {
+	return reporterPromptHashNeedsTemplateUpgrade(fmt.Sprintf("%x", sha256.Sum256([]byte(prompt))))
+}
+
+func reporterPromptHashNeedsTemplateUpgrade(hash string) bool {
+	switch hash {
 	case "b1ab0800d8137a0476f02d6e2b7e5380133b62f060096ad52dc412769af152c9", // 旧版默认交付规范
 		"8b3000d01b7f8bdee0a4b1f4fcee3beb8350744d10144c5c2669090acffd83ed", // 补回攻击链章节的默认值
 		"8f8e5a14828823f4b3ca6f255ed0a8775787bb31d08c5cb2c5576222ad2a81bd", // 旧版固定五节模板
@@ -761,10 +767,44 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 		"8e639fbad0e554fe409bc34dc1c329992d7fb38e5f4fe8d61614a1e2c8f75138", // v11 精简事实边界提示词
 		"c6c12f63c6c24062529222027333d59f49ff34e0e18ab464589d31f7b955e813", // v13 默认交付报告提示词
 		"1b97167790b635b784598e7ff380ded5d798843156d9f299fd2db572a2ac53bd", // v14 默认交付报告提示词
-		"5a4985c0a7839ed1a9602d2bfa26342fbce264c0608a46d081ea467904ccbf3e": // v15 默认交付报告提示词
+		"5a4985c0a7839ed1a9602d2bfa26342fbce264c0608a46d081ea467904ccbf3e", // v15 默认交付报告提示词
+		"92150e16f0ec293e597f4b5b0631ac1793a5515d93fb614c1449f2c79cae53df": // 当前版重复说明提示词
 		return true
 	default:
 		return false
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV17() {
+	const flag = "reporter_prompt_delivery_template_v17"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取精简提示词迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 精简默认交付报告提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已移除重复的交付报告规则")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存精简提示词迁移标记失败: %v", err)
 	}
 }
 
@@ -992,7 +1032,9 @@ const reporterToolCallMessageV10 = "上面刚有一个漏洞被 report_finding �
 	"保存前由当前 Reporter 自查事实、复现条件、影响边界、攻击链和证据引用；不要补造缺失事实。只根据明确的格式错误作必要修正，不无限重试。" +
 	"最后调用 update_finding_report(finding_id=finding_node_id, report, delivery_report, cvss_vector, evidence_version=实际读取的 version) 一次保存两份报告。"
 
-const reporterToolCallMessage = reporterToolCallMessageV10
+const reporterToolCallMessageV11 = "漏洞登记后，读取漏洞节点、对应执行记录和原始证据，核对实际操作、结果、失败和未验证事项。按 Reporter 提示词中的固定结构写详细报告与交付报告；不要补造缺失事实。最后一次调用 update_finding_report 保存两份报告，使用实际读取的证据版本。"
+
+const reporterToolCallMessage = reporterToolCallMessageV11
 
 // 旧版触发消息(0.3.8 及更早)。只有仍与它逐字相同的记录才会被迁移覆盖，用户改过的保持原样。
 const reporterToolCallMessageV1 = "上面刚有一个漏洞被 report_finding 登记。请从触发上下文里取出 finding_id" +
@@ -1002,10 +1044,38 @@ const reporterToolCallMessageV1 = "上面刚有一个漏洞被 report_finding �
 func reporterTriggerMessageNeedsUpgrade(message string) bool {
 	switch message {
 	case reporterToolCallMessageV1, reporterToolCallMessageV2, reporterToolCallMessageV2Legacy,
-		reporterToolCallMessageV3, reporterToolCallMessageV4, reporterToolCallMessageV5, reporterToolCallMessageV6, reporterToolCallMessageV7, reporterToolCallMessageV8, reporterToolCallMessageV9:
+		reporterToolCallMessageV3, reporterToolCallMessageV4, reporterToolCallMessageV5, reporterToolCallMessageV6, reporterToolCallMessageV7, reporterToolCallMessageV8, reporterToolCallMessageV9, reporterToolCallMessageV10:
 		return true
 	default:
 		return false
+	}
+}
+
+func (s *Server) upgradeReporterTriggerMessageV11() {
+	const flag = "reporter_trigger_delivery_report_v11"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取精简触发消息迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	triggers, err := s.m.pg.ListTriggersFor("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取触发器失败: %v", err)
+		return
+	}
+	for _, trigger := range triggers {
+		if !trigger.OnToolCall || trigger.ToolCallMessage != reporterToolCallMessageV10 {
+			continue
+		}
+		trigger.ToolCallMessage = reporterToolCallMessage
+		if err := s.m.pg.UpdateTrigger(trigger); err != nil {
+			log.Printf("[reporter] 精简触发消息失败: %v", err)
+			return
+		}
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存精简触发消息迁移标记失败: %v", err)
 	}
 }
 

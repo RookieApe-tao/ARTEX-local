@@ -39,10 +39,6 @@ const DeliveryReportWritingRules = DeliveryReportRuntimeGuidance + DeliveryRepor
 CVSS 4.0：完整 Base 向量 评分 分数（等级）
 一级标题就是漏洞名称，不再另写“漏洞名称”。CVSS 向量、分数和等级须作为一组保持一致，并与保存参数一致。已有定级时，定级依据只解释材料支持的权限和影响，不得另行给出冲突的危害等级；发现向量、分数或等级互相矛盾时，标明需人工复核，不自行改分。向量不能作为影响已发生的证据。
 
-生成结构化草稿时，JSON 的 description 字段必须按“描述正文、### 定级依据、依据正文”组织；test_process 字段必须依次包含“### 发现过程与攻击思路”“### 失败尝试与未验证项”“### Burp 复现”及各自正文；discovery_path 字段必须包含“### 复测标准”及正文。每个子标题下都要有内容，没有失败记录时直接写没有记录，不虚构失败。
-
-攻击链字段只写简短的中文树形节点，不写 Markdown 标题、完整 HTTP 头或请求正文。每个节点只写一项操作或结果；并列请求放在同一父节点下。非 HTTP 问题从已留存的命令开始，结果只引用实际输出，不把进程身份写成登录过程。会话状态用“带原会话请求”“不带会话请求”等中文描述。
-
 二级标题固定为以下五节，顺序不可改变：
 
 ## 描述
@@ -69,3 +65,13 @@ CVSS 4.0：完整 Base 向量 评分 分数（等级）
 写修复后可实际观察的最小判据，不把建议步骤写成已完成结果。
 
 保存前最后检查：身份依据来自哪里；请求和响应是否实际存在；报告是否把合成身份写成真实登录、把占位凭据写成真实头、把响应差异写成数据泄露；修复是否只有一项；攻击链树枝是否正确。存在任一问题时在本次输出中改正，不增加模型调用。`
+
+// Structured draft generation has a JSON contract, while Reporter writes a
+// complete Markdown report. Keeping those formats separate avoids competing
+// output instructions in the same system prompt.
+const DeliveryReportDraftRules = DeliveryReportRuntimeGuidance + DeliveryReportHardCaseGuidance + DeliveryReportStyleGuidance + `
+
+本次只生成交付报告草稿，不调用工具。平台生成标题、CVSS 行、五节标题和原始报文附件。只返回这个 JSON 对象，不加 Markdown 围栏或解释；字段值均为非空字符串：
+{"cvss_vector":"","description":"","remediation":"","test_process":"","attack_chain":"","discovery_path":""}
+description 先写问题，再依次包含“### 定级依据”和依据正文。test_process 依次包含“### 发现过程与攻击思路”“### 失败尝试与未验证项”“### Burp 复现”，每节都写正文；没有失败记录时明确写没有记录。discovery_path 包含“### 复测标准”和正文。
+attack_chain 只写简短树形节点，每个节点对应一项有证据的操作或结果。HTTP 节点保留原始 METHOD 和 path，不写请求头或正文；非 HTTP 从已留存命令开始。平台会添加 text 代码围栏。整份正文不超过 800 字符。`

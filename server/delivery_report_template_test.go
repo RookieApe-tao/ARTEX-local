@@ -79,6 +79,9 @@ func TestFindingReportToolRejectsInvalidTemplateBeforeDatabase(t *testing.T) {
 }
 
 func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T) {
+	if !reporterPromptHashNeedsTemplateUpgrade("92150e16f0ec293e597f4b5b0631ac1793a5515d93fb614c1449f2c79cae53df") {
+		t.Fatal("previous default prompt with duplicated JSON and Markdown rules would not receive the migration")
+	}
 	previous, err := os.ReadFile("testdata/reporter-default-v3.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -140,12 +143,12 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 }
 
 func TestReporterTriggerUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T) {
-	for _, previous := range []string{reporterToolCallMessageV1, reporterToolCallMessageV2, reporterToolCallMessageV2Legacy, reporterToolCallMessageV3, reporterToolCallMessageV4, reporterToolCallMessageV5, reporterToolCallMessageV6, reporterToolCallMessageV7, reporterToolCallMessageV8, reporterToolCallMessageV9} {
+	for _, previous := range []string{reporterToolCallMessageV1, reporterToolCallMessageV2, reporterToolCallMessageV2Legacy, reporterToolCallMessageV3, reporterToolCallMessageV4, reporterToolCallMessageV5, reporterToolCallMessageV6, reporterToolCallMessageV7, reporterToolCallMessageV8, reporterToolCallMessageV9, reporterToolCallMessageV10} {
 		if !reporterTriggerMessageNeedsUpgrade(previous) {
 			t.Fatal("previous stock trigger would retain superseded delivery instructions")
 		}
 	}
-	for _, preserved := range []string{reporterToolCallMessage, reporterToolCallMessageV9 + "\n用户自定义要求。", "自定义触发内容"} {
+	for _, preserved := range []string{reporterToolCallMessage, reporterToolCallMessageV10 + "\n用户自定义要求。", "自定义触发内容"} {
 		if reporterTriggerMessageNeedsUpgrade(preserved) {
 			t.Fatal("custom or already current trigger would be replaced")
 		}

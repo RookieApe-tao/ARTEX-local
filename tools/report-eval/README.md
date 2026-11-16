@@ -2,7 +2,7 @@
 
 这组材料用于检查报告写作规则，覆盖越权、注入、并发、登录会话、非 HTTP 和证据不完整六类情况。所有账号、数据、路径和报文均为合成材料；`report-eval.invalid` 不提供测试服务，也不会被访问。
 
-`prepare`、`collect`、`review` 和 `compare` 是离线操作，不访问网络。`run-live` 只连接本机 ARTEX，将六个固定样本分别交给已配置的报告模型生成一次；Reporter 在同一次生成中按系统提示自查，接口仅提交固定样本编号，不接受自定义提示词，模型请求不含工具。执行时通过终端交互输入 ARTEX 登录密码，会话令牌只保留在进程内，不写入文件或日志。
+`prepare`、`collect`、`review` 和 `compare` 是离线操作，不访问网络。`run-live` 只连接本机 ARTEX，将六个固定样本分别交给已配置的报告模型生成一次；Reporter 在同一次生成中按系统提示自查，接口仅提交固定样本编号，不接受自定义提示词，模型请求不含工具。接口优先解析 JSON 草稿；模型偶尔返回完整五节 Markdown 时，由本地解析器提取章节，不增加模型调用。执行时通过终端交互输入 ARTEX 登录密码，会话令牌只保留在进程内，不写入文件或日志。
 
 服务端评测接口需要显式设置 `ARTEX_REPORT_EVAL_ENABLED=true`，默认关闭，并继续使用 ARTEX JWT 鉴权。评测完成后应关闭此开关。每个成功样本调用模型一次，输出目录包含模型草稿、附加的原始合成材料、token/耗时和待人工填写的评分表。
 
@@ -10,7 +10,7 @@
 
 ## 使用同一模型比较改前与改后
 
-1. 改前规则固定在 `policies/before.go`，改后规则使用 `agent/delivery_report_template.go`。`--policy-source` 只提取 Go 源码中的 `DeliveryReportWritingRules`，支持旧版原始字符串，以及新版与 `DeliveryReportRuntimeGuidance` 的常量拼接；其他表达式会被拒绝，不执行 Go 代码，不读取 ARTEX 运行配置。模型标识及生成参数必须与实际调用一致，无法确认的参数可不填，工具会标记对照可重复性受限。
+1. 改前规则固定在 `policies/before.go`，改后规则使用 `agent/delivery_report_template.go`。`--policy-source` 在新源码中提取 `DeliveryReportDraftRules`，旧源码回退到 `DeliveryReportWritingRules`；只接受已知纯文本常量拼接，不执行 Go 代码，不读取 ARTEX 运行配置。模型标识及生成参数必须与实际调用一致，无法确认的参数可不填，工具会标记对照可重复性受限。
 
    ```sh
    python3 tools/report-eval/evaluate.py prepare \

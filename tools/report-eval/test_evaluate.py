@@ -13,15 +13,17 @@ SPEC.loader.exec_module(EVAL)
 
 
 class ReportEvaluationTest(unittest.TestCase):
-    def test_go_policy_supports_old_raw_and_current_shared_guidance(self):
+    def test_go_policy_supports_old_raw_and_current_draft_guidance(self):
         old = "const DeliveryReportWritingRules = `旧版规则`\n"
         current = (
             "const DeliveryReportRuntimeGuidance = `共享运行约定`\n\n"
+            "const DeliveryReportHardCaseGuidance = `边界规则`\n\n"
             "const DeliveryReportStyleGuidance = `简短规则`\n\n"
             "const DeliveryReportWritingRules = DeliveryReportRuntimeGuidance + DeliveryReportStyleGuidance + `新版写作规则`\n"
+            "const DeliveryReportDraftRules = DeliveryReportRuntimeGuidance + DeliveryReportHardCaseGuidance + DeliveryReportStyleGuidance + `JSON 草稿规则`\n"
         )
         self.assertEqual(EVAL.expand_go_policy(old), "旧版规则")
-        self.assertEqual(EVAL.expand_go_policy(current), "共享运行约定简短规则新版写作规则")
+        self.assertEqual(EVAL.expand_go_policy(current), "共享运行约定边界规则简短规则JSON 草稿规则")
         for unsupported in (
             "const DeliveryReportWritingRules = unknown()\n",
             "const DeliveryReportWritingRules = `规则` + readSecret()\n",
