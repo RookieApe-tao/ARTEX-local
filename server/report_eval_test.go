@@ -261,10 +261,9 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"test_process 依次包含“### 发现过程与攻击思路”“### 失败尝试与未验证项”“### Burp 复现”",
 		"discovery_path 包含“### 复测标准”和正文",
 		"attack_chain 只写简短树形节点",
-		"每个 HTTP 请求节点必须包含原始 METHOD 和 path",
-		"输出前检查总长度，超出时删重复解释",
-		"不写请求头或正文",
-		"每个 HTTP 请求节点必须包含原始 METHOD 和 path",
+		"每个 HTTP 请求节点逐字保留证据中的 METHOD 和 path",
+		"不得硬截断或删除关键接口、结果、成立条件和未验证边界",
+		"不补请求正文；响应单独缩进到对应请求下，不用行内箭头",
 		"平台会添加 text 代码围栏",
 		"写作前按材料核对身份与权限、操作、请求或命令、实际结果、失败、未知项和来源",
 		"原始请求/响应和命令输出优先于 worker 总结、漏洞摘要和旧报告",
@@ -275,6 +274,16 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"评分前提需复核",
 		"当前不提出代码修复建议",
 		"SQL 注入只给一个修复：使用参数化查询",
+		"布尔注入的恒真、恒假和 UNION 请求必须作为同一测试入口的并列分支",
+		"相同条件重复发送时保留请求次数和各次结果",
+		"只有证据说明后一操作依赖前一结果时才画成连续步骤",
+		"布尔注入的恒真、恒假和 UNION 请求必须作为同一测试入口的并列分支",
+		"测试过程逐项写明重复发送次数和结果",
+		"涉及数据变化时，攻击链保留写入前基线、写入操作和写入后回读",
+		"每个 HTTP 请求节点逐字保留证据中的 METHOD 和 path（含百分号编码、查询参数）",
+		"响应单独缩进到对应请求下，不用行内箭头",
+		"整张图只有一个根节点",
+		"五节分配上限（含节标题、子标题和链路）：描述 160、修复 80、测试过程 260、攻击链 160、证据说明 100 字符",
 		"当前样本未验证该前提，评分需复核；不得同时写成已发生泄露",
 		"只有材料明确记录客户端并发发送时才使用“并发提交”父节点",
 		"回读请求与并发组并列，放在所有并发请求之后",
@@ -377,6 +386,10 @@ func TestDeliveryReportDraftMovesRequiredSubheadingsToOwnLines(t *testing.T) {
 	}
 	if !strings.Contains(draft.Description, "\n### 定级依据\n") {
 		t.Fatalf("plain rating label was not normalized to a required subheading: %q", draft.Description)
+	}
+	joinedHeading := normalizeDeliveryDraftSubheadings("结果。### 定级依据影响已观察。", "定级依据")
+	if !strings.Contains(joinedHeading, "\n### 定级依据\n影响已观察。") {
+		t.Fatalf("heading joined directly to prose was not normalized: %q", joinedHeading)
 	}
 	report := strings.Join([]string{
 		"# 测试系统 作业越权",
@@ -560,7 +573,7 @@ func TestNormalizeSyntheticDeliveryReportBurp(t *testing.T) {
 	input := map[string]string{"synthetic": "true", "evidence_transport": "http"}
 	content := "### 发现过程与攻击思路\n合成请求。\n### Burp 复现\n在 Repeater 中替换 X-Eval-Actor 为真实凭证。\n### 失败尝试与未验证项\n未验证。"
 	got := normalizeSyntheticDeliveryReportBurp(input, content)
-	if strings.Contains(got, "替换 X-Eval-Actor") || !strings.Contains(got, "合成请求和身份标记不对应真实目标或会话") || !strings.Contains(got, "### 失败尝试与未验证项") {
+	if strings.Contains(got, "替换 X-Eval-Actor") || !strings.Contains(got, "合成材料不能直接重放") || !strings.Contains(got, "### 失败尝试与未验证项") {
 		t.Fatalf("synthetic Repeater guidance was not safely normalized: %q", got)
 	}
 	if unchanged := normalizeSyntheticDeliveryReportBurp(map[string]string{}, content); unchanged != content {

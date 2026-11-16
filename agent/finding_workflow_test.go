@@ -79,7 +79,7 @@ func TestReportTemplateContractReachesCustomToolsWithBindingDisabled(t *testing.
 	if tool.Description() != "USER CUSTOM DESCRIPTION" {
 		t.Fatal("runtime decoration modified the original tool")
 	}
-	if !strings.Contains(guidance, DeliveryReportRuntimeGuidance) || !strings.Contains(guidance, DeliveryReportStyleGuidance) {
+	if !strings.Contains(guidance, DeliveryReportRuntimeGuidance) || !strings.Contains(guidance, DeliveryReportChainGuidance) || !strings.Contains(guidance, DeliveryReportStyleGuidance) {
 		t.Fatal("custom reporter lost the writing rules while traffic binding was disabled")
 	}
 }
@@ -112,6 +112,9 @@ func TestReportRuntimeGuidanceFollowsFinalPermissions(t *testing.T) {
 				if strings.Contains(system[0], DeliveryReportStyleGuidance) != permitted {
 					t.Fatalf("role=%s binding=%v permitted=%v: style guidance ignored final permissions", role, binding, permitted)
 				}
+				if strings.Contains(system[0], DeliveryReportChainGuidance) != permitted {
+					t.Fatalf("role=%s binding=%v permitted=%v: chain guidance ignored final permissions", role, binding, permitted)
+				}
 				if !permitted {
 					for _, tool := range tools {
 						if tool.Name() == report.Name() {
@@ -121,7 +124,7 @@ func TestReportRuntimeGuidanceFollowsFinalPermissions(t *testing.T) {
 					continue
 				}
 				stock, _ := deferredSystem(ReporterDefaultPrompt, def)
-				if strings.Count(stock[0], DeliveryReportRuntimeGuidance) != 1 || strings.Count(stock[0], DeliveryReportStyleGuidance) != 1 || !strings.Contains(stock[0], findingIDGuidance) {
+				if strings.Count(stock[0], DeliveryReportRuntimeGuidance) != 1 || strings.Count(stock[0], DeliveryReportChainGuidance) != 1 || strings.Count(stock[0], DeliveryReportStyleGuidance) != 1 || !strings.Contains(stock[0], findingIDGuidance) {
 					t.Fatal("stock prompt duplicated the writing rules or lost the ID contract")
 				}
 			}
@@ -159,6 +162,7 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 		"回读请求与并发组并列，放在所有并发请求之后",
 		"没有找到恢复操作，不等于无法恢复",
 		"交付正文以 500 字符为目标，最多 800 字符",
+		"五节分配上限（含节标题、子标题和链路）",
 		"X-Eval-Actor 等合成标记不是认证字段",
 		"禁用“判决项”“阴性结果”“如实交付”“零错配”",
 		"平台附加的完整报文不重抄",

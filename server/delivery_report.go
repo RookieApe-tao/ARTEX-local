@@ -312,7 +312,7 @@ func normalizeSyntheticDeliveryReportBurp(input map[string]string, content strin
 	if next := strings.Index(content[bodyStart:], "\n### "); next >= 0 {
 		end = bodyStart + next
 	}
-	replacement := heading + "\n本次未在 Burp Repeater 发送。合成请求和身份标记不对应真实目标或会话，不能直接重放。真实复测需在授权目标上正常登录并捕获实际请求，再在 Repeater 重放，核对响应和前后数据变化。"
+	replacement := heading + "\n本次未在 Burp Repeater 发送。合成材料不能直接重放；真实复测需登录授权目标，在 Burp 捕获并重放请求，核对响应和前后结果。"
 	return content[:start] + replacement + content[end:]
 }
 
@@ -331,12 +331,6 @@ func normalizeDeliveryDraftSubheadings(content string, headings ...string) strin
 			}
 			index := strings.Index(line, marker)
 			if index >= 0 {
-				boundary := index + len(marker)
-				if boundary < len(line) && line[boundary] != ' ' && line[boundary] != '\t' {
-					if !strings.HasPrefix(line[boundary:], ":") && !strings.HasPrefix(line[boundary:], "：") {
-						return
-					}
-				}
 				position = offset + index
 				return
 			}

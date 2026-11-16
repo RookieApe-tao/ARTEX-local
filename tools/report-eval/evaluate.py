@@ -488,8 +488,15 @@ def markdown_parts(report):
 
 def metrics(case, report):
     narrative, blocks, closed = markdown_parts(report)
+    normalized = report.replace("\r\n", "\n")
     # The platform appends raw evidence after the report body; it is outside the fixed template.
+    report_body = re.split(r"(?m)^### 原始材料\s*$", normalized, maxsplit=1)[0]
     narrative = re.split(r"(?m)^### 原始材料\s*$", narrative, maxsplit=1)[0]
+    length_lines = report_body.splitlines()
+    if length_lines and length_lines[0].startswith("# "):
+        length_lines = length_lines[1:]
+    length_lines = [line for line in length_lines if not line.startswith("CVSS 4.0：")]
+    narrative_characters = len("\n".join(length_lines).strip())
     heading_rows = re.findall(r"^ {0,3}(#{1,6})\s+(.+?)\s*$", narrative, re.M)
     headings = [text for marks, text in heading_rows if len(marks) == 2]
     subheadings = []
@@ -501,7 +508,31 @@ def metrics(case, report):
             subheadings.append((section, text))
     title_count = sum(1 for marks, _ in heading_rows if len(marks) == 1)
     unexpected_heading_levels = [len(marks) for marks, _ in heading_rows if len(marks) > 3]
-    normalized = report.replace("\r\n", "\n")
+    chain_match = re.search(
+        r"(?ms)^## 攻击链路\s*\n(.*?)(?=^## |\Z)", report_body
+    )
+    chain_text = chain_match.group(1) if chain_match else ""
+    chain_requests = []
+    for block in re.findall(r"```[^\n]*\n(.*?)```", chain_text, re.S):
+        for line in block.splitlines():
+            node = re.sub(r"^[\s│├└─>→↓]+", "", line)
+            request = re.match(
+                r"(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)", node
+            )
+            if request:
+                chain_requests.append(f"{request.group(1)} {request.group(2)}")
+    evidence_requests = set()
+    if case["kind"] == "http":
+        for item in case["evidence"]:
+            request_line = re.search(
+                r"(?m)^([A-Z]+)\s+(\S+)\s+HTTP/\d(?:\.\d)?\s*$",
+                item.get("request", ""),
+            )
+            if request_line:
+                evidence_requests.add(f"{request_line.group(1)} {request_line.group(2)}")
+    missing_chain_requests = [item for item in chain_requests if item not in evidence_requests]
+    if case["kind"] == "http" and not chain_requests:
+        missing_chain_requests.append("攻击链中没有 HTTP 请求节点")
     preserved, missing = [], []
     for material in case["evidence"]:
         fields = ("request", "response") if case["kind"] == "http" else ("command", "stdout", "stderr")
@@ -516,7 +547,8 @@ def metrics(case, report):
                 missing.append(name)
     return {
         "total_characters": len(report),
-        "narrative_characters": len(narrative),
+        "narrative_characters": narrative_characters,
+        "narrative_within_800_characters": narrative_characters <= 800,
         "headings": headings,
         "required_headings_ok": headings == HEADINGS,
         "subheadings": subheadings,
@@ -532,6 +564,11 @@ def metrics(case, report):
         "code_blocks": len(blocks),
         "verbatim_material_found": preserved,
         "verbatim_material_not_found": missing,
+        "attack_chain_request_nodes": chain_requests,
+        "attack_chain_request_paths_match_evidence": (
+            not missing_chain_requests if case["kind"] == "http" else None
+        ),
+        "attack_chain_request_paths_not_found": missing_chain_requests,
         "semantic_quality": "未自动判定；原文匹配和字数不能证明结论正确或文字易读",
     }
 

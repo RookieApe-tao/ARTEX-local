@@ -148,8 +148,30 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertTrue(measured["required_headings_ok"])
         self.assertTrue(measured["required_subheadings_ok"])
         self.assertTrue(measured["report_structure_ok"])
+        self.assertTrue(measured["narrative_within_800_characters"])
         self.assertFalse(measured["verbatim_material_not_found"])
         self.assertIn("未自动判定", measured["semantic_quality"])
+        report_body, appendix = report.split("### 原始材料", 1)
+        too_long = EVAL.metrics(material, report_body + "x" * 801 + "\n### 原始材料" + appendix)
+        self.assertFalse(too_long["narrative_within_800_characters"])
+
+    def test_attack_chain_request_paths_are_checked_against_raw_evidence(self):
+        case = EVAL.cases_by_id()["injection"]
+        draft = {
+            "cvss_vector": case["facts"]["cvss_vector"],
+            "description": "问题。\n### 定级依据\n测试依据。",
+            "remediation": "使用参数化查询。",
+            "test_process": "### 发现过程与攻击思路\n做对照测试。\n"
+            "### 失败尝试与未验证项\n字段值未读取。\n"
+            "### Burp 复现\n合成样本未用 Burp。",
+            "attack_chain": "```text\nGET /api/products?name=alpha\n"
+            "├─ GET /api/products?name=alpha' AND 1=1-- → 返回1条\n```",
+            "discovery_path": "### 复测标准\n比较真假条件响应。",
+        }
+        report = EVAL.attach_evidence(case, EVAL.report_from_draft(case, draft))
+        measured = EVAL.metrics(case, report)
+        self.assertFalse(measured["attack_chain_request_paths_match_evidence"])
+        self.assertIn("GET /api/products?name=alpha'", measured["attack_chain_request_paths_not_found"])
 
     def test_live_evaluation_only_accepts_loopback_and_renders_cvss_header(self):
         for url in ("https://example.com", "http://127.0.0.1.evil.test:8787", "http://user:placeholder@127.0.0.1:8787"):
