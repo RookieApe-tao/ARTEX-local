@@ -131,22 +131,24 @@ func TestReportRuntimeGuidanceFollowsFinalPermissions(t *testing.T) {
 
 func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 	for _, required := range []string{
-		"原始请求、响应和命令优先于摘要和旧报告",
+		"摘要和旧报告只用于找材料",
 		"没有找到恢复操作，不等于无法恢复",
 		"详细报告保留工具参数、准确时间、失败日志、哈希和证据索引",
-		"交付报告只留复现和修复必需内容",
-		"时间用北京时间",
-		"失败尝试只写确实执行过的操作",
-		"并发问题说明 Repeater 串行重放不能证明并发",
-		"资源归属关系用“当前用户”“作业所有者”等清楚称呼",
+		"交付报告只保留理解、复现和修复问题所需的信息",
+		"时间使用北京时间",
+		"失败尝试只写实际执行过的操作",
+		"Repeater 串行重放不能验证并发",
+		"身份关系用“当前用户”“作业所有者”等称呼",
 		"不得建议替换认证字段",
-		"只写材料明确支持的身份、权限、会话、工具和页面入口",
-		"正文测试步骤不要抄标记值",
-		"不能写成已读取数据库内容",
+		"合成身份标记和占位 Cookie 不能证明真实登录",
+		"正文不得抄这些占位值",
+		"不写已读取数据",
 		"不得另行给出冲突的危害等级",
-		"非关键未测项合并一句",
-		"平台会在报告末尾附加已绑定的完整请求和响应",
-		"保存前由同一 Reporter 自查",
+		"SQL 注入的修复只写参数化查询",
+		"除非材料证明内容敏感，不写敏感信息泄露",
+		"交付正文以 800 个汉字为目标",
+		"平台附加的完整报文不重抄",
+		"保存前由同一 Reporter 检查",
 	} {
 		if !strings.Contains(DeliveryReportWritingRules, required) {
 			t.Fatalf("delivery report guidance is missing %q", required)

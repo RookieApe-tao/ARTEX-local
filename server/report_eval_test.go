@@ -99,10 +99,10 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if provider.request.MaxTokens != deliveryReportMaxTokens {
 		t.Fatalf("evaluation max tokens=%d, want %d", provider.request.MaxTokens, deliveryReportMaxTokens)
 	}
-	if len(provider.request.System) != 1 || !strings.Contains(provider.request.System[0], "保存前由同一 Reporter 自查") {
+	if len(provider.request.System) != 1 || !strings.Contains(provider.request.System[0], "保存前由同一 Reporter 检查") {
 		t.Fatal("report generation call did not receive the same-Reporter self-check instructions")
 	}
-	for _, rule := range []string{"不得建议替换认证字段", "回读查询与各次请求结果分支对齐", "SQL 真假常量", "文件名、所有者名称和权限位不能单独证明文件内容敏感", "不得另行给出冲突的危害等级"} {
+	for _, rule := range []string{"不得建议替换认证字段", "回读查询与各次请求结果分支对齐", "SQL 真假常量", "除非材料证明内容敏感，不写敏感信息泄露", "不得另行给出冲突的危害等级"} {
 		if !strings.Contains(provider.request.System[0], rule) {
 			t.Fatalf("report generation instructions omitted rule %q", rule)
 		}
