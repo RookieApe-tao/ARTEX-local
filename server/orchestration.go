@@ -759,7 +759,9 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 		"c5fdbe6a4069cafda38f2c26b560c11faea0186f7554cfe472c26330950fc43f", // v10 固定报告默认提示词
 		"5d1f0391ca434e3d7f3649bea87f934c639ef8f80eb9b77d26858174519e5944", // v10 加入事实边界后的默认提示词
 		"8e639fbad0e554fe409bc34dc1c329992d7fb38e5f4fe8d61614a1e2c8f75138", // v11 精简事实边界提示词
-		"c6c12f63c6c24062529222027333d59f49ff34e0e18ab464589d31f7b955e813": // v13 默认交付报告提示词
+		"c6c12f63c6c24062529222027333d59f49ff34e0e18ab464589d31f7b955e813", // v13 默认交付报告提示词
+		"1b97167790b635b784598e7ff380ded5d798843156d9f299fd2db572a2ac53bd", // v14 默认交付报告提示词
+		"5a4985c0a7839ed1a9602d2bfa26342fbce264c0608a46d081ea467904ccbf3e": // v15 默认交付报告提示词
 		return true
 	default:
 		return false
@@ -767,7 +769,7 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 }
 
 func (s *Server) upgradeReporterDeliveryTemplate() {
-	const flag = "reporter_prompt_delivery_template_v14"
+	const flag = "reporter_prompt_delivery_template_v16"
 	value, _, err := s.m.pg.GetSetting(flag)
 	if err != nil {
 		log.Printf("[reporter] 读取固定模板迁移标记失败: %v", err)

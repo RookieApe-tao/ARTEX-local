@@ -125,7 +125,14 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptNeedsTemplateUpgrade(string(previousV13)) {
 		t.Fatal("previous v13 stock default would not receive the current evidence rules")
 	}
-	for _, customized := range []string{string(previous) + "\n用户自定义要求。", string(latestPrevious) + "\n用户自定义要求。", string(previousV9) + "\n用户自定义要求。", string(previousV10) + "\n用户自定义要求。", string(previousV11) + "\n用户自定义要求。", string(previousV13) + "\n用户自定义要求。", "自定义报告模板", agent.ReporterDefaultPrompt} {
+	previousV14, err := os.ReadFile("testdata/reporter-default-v14.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reporterPromptNeedsTemplateUpgrade(string(previousV14)) {
+		t.Fatal("previous v14 stock default would not receive the current concise rules")
+	}
+	for _, customized := range []string{string(previous) + "\n用户自定义要求。", string(latestPrevious) + "\n用户自定义要求。", string(previousV9) + "\n用户自定义要求。", string(previousV10) + "\n用户自定义要求。", string(previousV11) + "\n用户自定义要求。", string(previousV13) + "\n用户自定义要求。", string(previousV14) + "\n用户自定义要求。", "自定义报告模板", agent.ReporterDefaultPrompt} {
 		if reporterPromptNeedsTemplateUpgrade(customized) {
 			t.Fatal("custom or already current prompt would be replaced")
 		}

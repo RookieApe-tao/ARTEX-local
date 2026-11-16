@@ -102,7 +102,15 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if len(provider.request.System) != 1 || !strings.Contains(provider.request.System[0], "保存前由同一 Reporter 检查") {
 		t.Fatal("report generation call did not receive the same-Reporter self-check instructions")
 	}
-	for _, rule := range []string{"不得建议替换认证字段", "回读查询与各次请求结果分支对齐", "SQL 真假常量", "除非材料证明内容敏感，不写敏感信息泄露", "不得另行给出冲突的危害等级"} {
+	if strings.Count(provider.request.System[0], agent.DeliveryReportWritingRules) != 1 {
+		t.Fatal("compatibility draft generation duplicated the shared writing rules")
+	}
+	for _, staleRule := range []string{"并发漏洞须使用并发工具或脚本验证", "把过滤或拒绝特殊字符列为修复", "文件名、所有者名称和权限位不能单独证明文件内容敏感", "已知入口"} {
+		if strings.Contains(provider.request.System[0], staleRule) {
+			t.Fatalf("compatibility draft generation retained superseded guidance %q", staleRule)
+		}
+	}
+	for _, rule := range []string{"不得建议替换认证字段", "回读查询与各次请求结果分支对齐", "SQL 真假常量", "未证明内容敏感时不写信息泄露", "不得另行给出冲突的危害等级"} {
 		if !strings.Contains(provider.request.System[0], rule) {
 			t.Fatalf("report generation instructions omitted rule %q", rule)
 		}
@@ -243,35 +251,34 @@ func TestReportEvalReturnsSafeCompletionFailureCategory(t *testing.T) {
 func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) {
 	prompt := deliveryReportCompletionSystem()
 	for _, required := range []string{
-		"不改字段名、不增加字段、不输出解释文字",
-		"平台会拼装报告标题、CVSS 信息、五个二级标题和原始证据附件",
-		"每个字段只返回对应章节的正文",
-		"只给一项有证据支持的主要改动",
-		"不能证明真实登录身份",
-		"不猜 Cookie、Token 或请求头",
-		"SQL 注入测试若只比较恒真和恒假常量，只报告响应变化",
-		"各节只保留读者判断、复现和修复所需内容",
-		"攻击链的并列请求使用同一父节点和对齐分支",
-		"HTTP 问题的“Burp 复现”说明实际使用状态",
+		"本次只生成报告草稿，不调用工具",
+		"平台负责生成标题、CVSS 行、五节标题和原始证据附件",
+		"每个字段只填对应章节正文",
+		"只返回以下 JSON 对象",
+		"description 必须包含“### 定级依据”及其正文",
+		"test_process 必须按顺序包含“### 发现过程与攻击思路”“### 失败尝试与未验证项”“### Burp 复现”",
+		"discovery_path 必须包含“### 复测标准”及正文",
+		"attack_chain 只写简短中文树形节点",
+		"不得写 Markdown 标题、完整 HTTP 头或请求正文",
+		"HTTP 链路节点必须保留证据中的 METHOD 和 path",
+		"链路只概括入口、关键操作和观察结果",
+		"非 HTTP 样本从已留存命令开始，不把进程身份改写成登录过程",
 		"### 定级依据",
 		"### 发现过程与攻击思路",
 		"### 失败尝试与未验证项",
 		"### Burp 复现",
 		"### 复测标准",
-		"保存前由同一 Reporter 自查",
-		"合成样本说明未测试真实目标",
-		"输入有 cvss_vector_hint 时原样使用",
-		"输入中的 recorded_failures 用于核对实际失败",
-		"只返回六个字符串字段组成的 JSON 对象",
+		"保存前由同一 Reporter 检查",
+		"报告必须说明是合成测试",
+		"未证明内容敏感时不写信息泄露",
+		"并发问题说明 Repeater 串行重放不能证明并发",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("report completion prompt is missing %q", required)
 		}
 	}
-	for _, obsolete := range []string{"test_process 首行写", "执行工具：未记录", "按 evidence_transport 字段选择写法", "不添加三级标题", "测试时间：未记录"} {
-		if strings.Contains(prompt, obsolete) {
-			t.Fatalf("report completion prompt still forces execution-ledger content: %q", obsolete)
-		}
+	if strings.Count(prompt, agent.DeliveryReportWritingRules) != 1 {
+		t.Fatal("compatibility draft generation must inject the shared writing rules once")
 	}
 }
 
