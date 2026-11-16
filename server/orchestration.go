@@ -445,6 +445,14 @@ const previousFindingReportToolDescriptionTemplateV8 = "为已登记的漏洞一
 const previousDeliveryReportSaveGuidanceV9 = "以下结构和写作要求只适用于交付报告字段；详细报告仍保留原有章节和完整台账。交付报告须包含一个漏洞名称标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：" + agent.DeliveryReportSectionOrder + "。描述含“定级依据”；测试过程含“发现过程与攻击思路”“失败尝试与未验证项”“Burp 复现”；证据说明含“复测标准”。正文尽量简短，通常不超过 800 字；复杂案例可超过，不得删掉关键证据来凑长度。测试时间按记录换算为北京时间，缺失时写“未记录”。HTTP 问题说明 Burp Repeater 的实际使用情况或复测步骤。ARTEX 会附加完整原始请求和响应，不要在正文重复转述。"
 const previousFindingReportToolDescriptionTemplateV9 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + previousDeliveryReportSaveGuidanceV9 + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
+const previousDeliveryReportSaveGuidanceV10 = `以下结构和写作要求只适用于交付报告字段；详细报告仍保留原有章节和完整台账。交付报告须包含一个漏洞名称标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：描述、修复建议、测试过程、攻击链路、证据说明。描述含“定级依据”；测试过程含“发现过程与攻击思路”“失败尝试与未验证项”“Burp 复现”；证据说明含“复测标准”。正文尽量简短，通常不超过 800 字；复杂案例可超过，不得删掉关键证据来凑长度。测试时间按记录换算为北京时间，缺失时写“未记录”。HTTP 问题说明 Burp Repeater 的实际使用情况或复测步骤。ARTEX 会附加完整原始请求和响应，不要在正文重复转述。
+
+逐项区分观察到的行为、已确认的安全影响和已确认的根因。状态码、响应头、字段变化或 CVSS 向量只能证明其显示的信息，不能单独证明跨账号访问成功、文件正文已返回或真实数据已泄露。缺少响应正文、身份/权限证明或前后状态时，明确写“未验证”；安全缺陷尚未确认时，修复建议只列需要补齐的证据，不给代码改动结论。
+材料标记为合成、演示或占位时，相关身份、结果和内容只能称为样本观察，并明确未测试真实目标；不得称为真实用户资料、敏感数据或实际泄露。CVSS 涉及未观察到的影响时，说明评分前提待复核。
+根因只在源码、配置或服务端日志直接支持时填写。行为已确认而根因未知时，只建议一项针对已确认行为的可观察修复结果，不推断具体实现、不列备选方案；行为尚未确认时只列补证步骤。
+复现步骤和攻击链只使用记录中的身份条件、工具、命令、请求行、次数与结果；未记录时明确写未记录，不添加命令、工具、认证动作或测试结果。`
+const previousFindingReportToolDescriptionTemplateV10 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + previousDeliveryReportSaveGuidanceV10 + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
+
 const findingReportToolDescription = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + agent.DeliveryReportSaveGuidance + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
 func previousFindingReportToolDescriptions() []string {
@@ -459,6 +467,7 @@ func previousFindingReportToolDescriptions() []string {
 		previousFindingReportToolDescriptionTemplateV7,
 		previousFindingReportToolDescriptionTemplateV8,
 		previousFindingReportToolDescriptionTemplateV9,
+		previousFindingReportToolDescriptionTemplateV10,
 	}
 }
 
@@ -609,6 +618,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.upgradeReporterDeliveryTemplateV19() // 明确接口路径、字数检查和单一修复实现
 	s.upgradeReporterDeliveryTemplateV20() // 更新共享攻击链规范，避免旧默认提示词重复叠加
 	s.upgradeReporterDeliveryTemplateV21() // 收紧合成样本、根因和未验证影响的表述
+	s.upgradeReporterDeliveryTemplateV22() // 明确独立对照分支、原样命令和潜在影响边界
 	s.upgradeReporterTriggerMessage()      // 老库触发消息同步报告版式与链路图规范
 	s.upgradeReporterTriggerMessageV11()   // 移除触发消息中重复的报告写作规则
 	s.seedFindingTrafficTools()            // 增加可选证据参数及只读证据工具，保留用户配置
@@ -780,7 +790,8 @@ func reporterPromptHashNeedsTemplateUpgrade(hash string) bool {
 		"786d3a6b59b52c4d998398d297f41091d2db0187d2f47f21c3f531e9ec5489c2", // v17 事实整理提示词
 		"17aa6f65e6d88922dc086b17730357c00b3ef9d55535a85d513eb3cc795ede4e", // v18 事实整理默认提示词
 		"2e629b3e35fcab552a9a901419af419dfb721ebf15a654e9f8443f1c44d2d3ee", // v19 旧版 Reporter 默认提示词
-		"29a290fbc2d42bce7cf282b8c4da46605ee4deac38b9cf7df2500dad13d8171f": // v20 旧版 Reporter 默认提示词
+		"29a290fbc2d42bce7cf282b8c4da46605ee4deac38b9cf7df2500dad13d8171f", // v20 旧版 Reporter 默认提示词
+		"cf8c3a66a8230ab9bf7095d32e7025e56135010936d1f86765acc413ba441023": // v21 证据边界默认提示词
 		return true
 	default:
 		return false
@@ -963,6 +974,53 @@ func (s *Server) upgradeReporterDeliveryTemplateV21() {
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存证据边界提示词迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV22() {
+	const flag = "reporter_prompt_delivery_template_v22"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取独立对照提示词迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	previousDescriptions := previousFindingReportToolDescriptions()
+	placeholders := make([]string, len(previousDescriptions))
+	args := make([]any, 1, len(previousDescriptions)+1)
+	args[0] = findingReportToolDescription
+	for index, description := range previousDescriptions {
+		placeholders[index] = fmt.Sprintf("$%d", index+2)
+		args = append(args, description)
+	}
+	query := fmt.Sprintf(`UPDATE tools SET description=$1,updated_at=now()
+		WHERE key='update_finding_report' AND system AND description IN (%s)`, strings.Join(placeholders, ","))
+	if _, err := s.m.pg.Exec(query, args...); err != nil {
+		log.Printf("[reporter] 更新报告工具独立对照说明失败: %v", err)
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新报告独立对照提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已同步独立对照、原样命令和潜在影响边界")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存独立对照提示词迁移标记失败: %v", err)
 	}
 }
 
