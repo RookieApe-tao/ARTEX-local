@@ -113,7 +113,7 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 			t.Fatalf("compatibility draft generation retained superseded guidance %q", staleRule)
 		}
 	}
-	for _, rule := range []string{"不得建议替换认证字段", "回读查询与各次请求结果分支对齐", "SQL 真假常量", "未证明内容敏感时不写信息泄露", "CVSS 向量、分数和等级保持一致"} {
+	for _, rule := range []string{"样本身份不是实际登录凭证", "结果放在触发它的操作下面", "恒真、恒假条件只报告响应差异", "当前样本未验证该前提，评分需复核；不得同时写成已发生泄露", "已有向量时核对分数和等级"} {
 		if !strings.Contains(provider.request.System[0], rule) {
 			t.Fatalf("report generation instructions omitted rule %q", rule)
 		}
@@ -261,18 +261,35 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"test_process 依次包含“### 发现过程与攻击思路”“### 失败尝试与未验证项”“### Burp 复现”",
 		"discovery_path 包含“### 复测标准”和正文",
 		"attack_chain 只写简短树形节点",
+		"每个 HTTP 请求节点必须包含原始 METHOD 和 path",
+		"输出前检查总长度，超出时删重复解释",
 		"不写请求头或正文",
-		"HTTP 节点保留原始 METHOD 和 path",
+		"每个 HTTP 请求节点必须包含原始 METHOD 和 path",
 		"平台会添加 text 代码围栏",
+		"写作前按材料核对身份与权限、操作、请求或命令、实际结果、失败、未知项和来源",
+		"原始请求/响应和命令输出优先于 worker 总结、漏洞摘要和旧报告",
+		"只有缺陷行为已由材料确认时，才给对应的代码或配置修复",
+		"结果放在触发它的操作下面",
+		"并发操作才并列",
+		"只有材料明确记载并发测试时才标注“并发”",
+		"评分前提需复核",
+		"当前不提出代码修复建议",
+		"SQL 注入只给一个修复：使用参数化查询",
+		"当前样本未验证该前提，评分需复核；不得同时写成已发生泄露",
+		"只有材料明确记录客户端并发发送时才使用“并发提交”父节点",
+		"回读请求与并发组并列，放在所有并发请求之后",
 		"### 定级依据",
 		"### 发现过程与攻击思路",
 		"### 失败尝试与未验证项",
 		"### Burp 复现",
 		"### 复测标准",
 		"保存前由同一 Reporter 检查",
-		"报告必须说明是合成测试",
-		"未证明内容敏感时不写信息泄露",
-		"Repeater 串行重放不能验证并发",
+		"材料标注为合成样本时，说明是合成测试",
+		"缺少响应正文或账号依据",
+		"Repeater 串行重放不能证明并发",
+		"真实报告基于平台附加的授权原始请求",
+		"说明不能直接重放及真实复测需要的材料",
+		"未确认线索时不预测漏洞成立后应如何调整 CVSS",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("report completion prompt is missing %q", required)
@@ -340,11 +357,11 @@ func TestDeliveryReportDraftMovesRequiredSubheadingsToOwnLines(t *testing.T) {
 	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
 	raw, err := json.Marshal(deliveryReportDraft{
 		CVSSVector:    vector,
-		Description:   "普通用户可修改作业。### 定级依据\n现有材料显示配置已变化。",
+		Description:   "普通用户可修改作业。定级依据：现有材料显示配置已变化。",
 		Remediation:   "服务端校验作业归属。",
-		TestProcess:   "步骤。### 发现过程与攻击思路\n重放修改请求。### 失败尝试与未验证项\n没有记录失败尝试。### Burp 复现\nBurp 复测未验证。",
+		TestProcess:   "步骤。### 发现过程与攻击思路：重放修改请求。### 失败尝试与未验证项：没有记录失败尝试。### Burp 复现：Burp 复测未验证。",
 		AttackChain:   "普通用户\n└─ POST /api/jobs/job-a/types\n   └─ 配置改变",
-		DiscoveryPath: "证据来自固定样本。### 复测标准\n非所有者请求被拒绝，作业配置保持不变。",
+		DiscoveryPath: "证据来自固定样本。### 复测标准：非所有者请求被拒绝，作业配置保持不变。",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -357,6 +374,9 @@ func TestDeliveryReportDraftMovesRequiredSubheadingsToOwnLines(t *testing.T) {
 		if strings.Contains(value, "。### ") {
 			t.Fatalf("subheading remained attached to prose: %q", value)
 		}
+	}
+	if !strings.Contains(draft.Description, "\n### 定级依据\n") {
+		t.Fatalf("plain rating label was not normalized to a required subheading: %q", draft.Description)
 	}
 	report := strings.Join([]string{
 		"# 测试系统 作业越权",
@@ -423,24 +443,128 @@ func TestEnsureDeliveryAttackChainTextFence(t *testing.T) {
 		t.Fatalf("chain with duplicated language label=%q, want %q", got, want)
 	}
 	arrowChain := "入口：普通用户登录 -> POST /api/jobs/job-a/types -> 作业状态发生变化"
-	if got, want := ensureDeliveryAttackChainTextFence(arrowChain), "```text\n普通用户登录\n   ├─ POST /api/jobs/job-a/types\n   └─ 作业状态发生变化\n```"; got != want {
+	if got, want := ensureDeliveryAttackChainTextFence(arrowChain), "```text\n普通用户登录\n   └─ POST /api/jobs/job-a/types\n      └─ 作业状态发生变化\n```"; got != want {
 		t.Fatalf("arrow chain=%q, want %q", got, want)
 	}
-	if got, want := ensureDeliveryAttackChainTextFence("用户持有会话\n    └─ ↓\n    └─ > GET /api/me"), "```text\n用户持有会话\n    └─ GET /api/me\n```"; got != want {
+	if got, want := ensureDeliveryAttackChainTextFence("用户持有会话\n    └─ ↓\n    └─ > GET /api/me"), "```text\n用户持有会话\n   └─ GET /api/me\n```"; got != want {
 		t.Fatalf("decorated tree=%q, want %q", got, want)
+	}
+	arrowInText := "用户提交参数含 ↓ 字符\n   ├─ 请求 A 返回 200\n   └─ 请求 B 返回 403"
+	if got := ensureDeliveryAttackChainTextFence(arrowInText); got != "```text\n"+arrowInText+"\n```" {
+		t.Fatalf("down arrow in prose changed the tree: %q", got)
 	}
 	misaligned := "登记请求\n└─ 并发提交相同编号\n   ├─ 请求 A 返回 201\n│  └─ 回读查询得到三条记录"
 	if got, want := ensureDeliveryAttackChainTextFence(misaligned), "```text\n登记请求\n└─ 并发提交相同编号\n   ├─ 请求 A 返回 201\n   └─ 回读查询得到三条记录\n```"; got != want {
 		t.Fatalf("misaligned tree=%q, want %q", got, want)
 	}
 	decorated := "```text\n用户已登录且知晓目标作业编号\n   └─ ↓\n   └─ POST /api/jobs/job-a/types\n   └─ ↓\n   └─ 服务端未校验所有权，直接接受修改\n```"
-	want := "```text\n用户已登录且知晓目标作业编号\n   ├─ POST /api/jobs/job-a/types\n   └─ 服务端未校验所有权，直接接受修改\n```"
+	want := "```text\n用户已登录且知晓目标作业编号\n   └─ POST /api/jobs/job-a/types\n      └─ 服务端未校验所有权，直接接受修改\n```"
 	if got := ensureDeliveryAttackChainTextFence(decorated); got != want {
 		t.Fatalf("decorated model tree=%q, want %q", got, want)
+	}
+	flatConcurrent := "GET /api/items?key=x\n   ├─ HTTP 200 total=0\n   ├─ 并发提交 POST /api/items\n   ├─ POST /api/items\n   ├─ HTTP 201 id=1\n   ├─ POST /api/items\n   ├─ HTTP 201 id=2\n   ├─ GET /api/items?key=x\n   └─ HTTP 200 total=2"
+	concurrentRequests := "POST /api/items HTTP/1.1\nContent-Length: 0\n\nPOST /api/items HTTP/1.1\nContent-Length: 0\n\n"
+	concurrentWant := "```text\nGET /api/items?key=x\n   └─ HTTP 200 total=0\n      ├─ 并发提交 2 次相同请求\n      │  ├─ POST /api/items\n      │  │  └─ HTTP 201 id=1\n      │  └─ POST /api/items\n      │     └─ HTTP 201 id=2\n      └─ GET /api/items?key=x\n         └─ HTTP 200 total=2\n```"
+	if got := ensureDeliveryAttackChainTextFenceWithEvidence(flatConcurrent, concurrentRequests, true); got != concurrentWant {
+		t.Fatalf("flat concurrent chain=%q, want %q", got, concurrentWant)
+	}
+	nestedConcurrent := "GET /api/items?key=x\n   └─ HTTP 200 total=0\n      ├─ 并发提交 POST /api/items\n      │  ├─ HTTP 201 id=1\n      │  └─ HTTP 201 id=2\n      └─ GET /api/items?key=x\n         └─ HTTP 200 total=2"
+	if got := ensureDeliveryAttackChainTextFenceWithEvidence(nestedConcurrent, concurrentRequests, true); got != concurrentWant {
+		t.Fatalf("nested concurrent chain=%q, want %q", got, concurrentWant)
+	}
+	concurrentThree := "GET /api/registrations?reference=EVAL-RACE\n   └─ HTTP 200 total=0\n      └─ 并发父节点：\n         └─ POST /api/registrations\n            └─ HTTP 201 id=reg-1\n               └─ POST /api/registrations\n                  └─ HTTP 201 id=reg-2\n                     └─ POST /api/registrations\n                        └─ HTTP 201 id=reg-3\n                           └─ GET /api/registrations?reference=EVAL-RACE\n                              └─ HTTP 200 total=3"
+	requestPacket := strings.Join([]string{
+		"### 提交前查询 · 请求\nGET /api/registrations?reference=EVAL-RACE HTTP/1.1\r\nContent-Length: 0\r\n\r\n",
+		"### 第一次并发提交 · 请求\nPOST /api/registrations HTTP/1.1\r\nContent-Length: 25\r\n\r\n{\"reference\":\"EVAL-RACE\"}",
+		"### 第二次并发提交 · 请求\nPOST /api/registrations HTTP/1.1\r\nContent-Length: 25\r\n\r\n{\"reference\":\"EVAL-RACE\"}",
+		"### 第三次并发提交 · 请求\nPOST /api/registrations HTTP/1.1\r\nContent-Length: 25\r\n\r\n{\"reference\":\"EVAL-RACE\"}",
+		"### 提交后查询 · 请求\nGET /api/registrations?reference=EVAL-RACE HTTP/1.1\r\nContent-Length: 0\r\n\r\n",
+		"### 缺少业务编号的提交 · 请求\nPOST /api/registrations HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}",
+	}, "\n\n")
+	if method, path, count := repeatedDeliveryRequest(requestPacket, "并发父节点"); method != http.MethodPost || path != "/api/registrations" || count != 3 {
+		t.Fatalf("actual packet repetition=%s %s x%d", method, path, count)
+	}
+	concurrentThreeWant := "```text\nGET /api/registrations?reference=EVAL-RACE\n   └─ HTTP 200 total=0\n      ├─ 并发提交 3 次相同请求\n      │  ├─ POST /api/registrations\n      │  │  └─ HTTP 201 id=reg-1\n      │  ├─ POST /api/registrations\n      │  │  └─ HTTP 201 id=reg-2\n      │  └─ POST /api/registrations\n      │     └─ HTTP 201 id=reg-3\n      └─ GET /api/registrations?reference=EVAL-RACE\n         └─ HTTP 200 total=3\n```"
+	if got := ensureDeliveryAttackChainTextFenceWithEvidence(concurrentThree, requestPacket, true); got != concurrentThreeWant {
+		t.Fatalf("concurrent evidence with unrelated same-path request was normalized incorrectly:\n%s\nwant:\n%s", got, concurrentThreeWant)
+	}
+	ambiguous := "普通用户\n   ├─ 请求 A 返回 200\n   └─ 请求 B 返回 403"
+	if got := ensureDeliveryAttackChainTextFence(ambiguous); got != "```text\n"+ambiguous+"\n```" {
+		t.Fatalf("ambiguous branches were converted to a sequence: %q", got)
 	}
 	fenced := "```text\n" + plain + "\n```"
 	if got := ensureDeliveryAttackChainTextFence(fenced); got != fenced {
 		t.Fatalf("already fenced chain changed: %q", got)
+	}
+}
+
+func TestNormalizeDeliveryReportTerminology(t *testing.T) {
+	if got, want := normalizeDeliveryReportTerminology("文件属主为 eval-admin；属主可读"), "文件所有者为 eval-admin；所有者可读"; got != want {
+		t.Fatalf("normalized terminology=%q, want %q", got, want)
+	}
+}
+
+func TestNormalizeDeliveryReportRemediation(t *testing.T) {
+	input := map[string]string{"finding_name": "商品查询参数布尔盲注"}
+	got := normalizeDeliveryReportRemediation(input, "增加输入校验并使用参数化查询，避免拼接 SQL。")
+	if want := "对相关查询参数使用参数化查询，避免将用户输入拼接进 SQL 语句。"; got != want {
+		t.Fatalf("normalized remediation=%q, want %q", got, want)
+	}
+	nonInjection := normalizeDeliveryReportRemediation(map[string]string{"finding_name": "SQL Server 版本信息暴露"}, "限制版本信息响应。")
+	if nonInjection != "限制版本信息响应。" {
+		t.Fatalf("non-injection remediation changed: %q", nonInjection)
+	}
+	sessionFix := normalizeDeliveryReportRemediation(map[string]string{"finding_name": "退出登录后原会话仍能访问"}, "删除服务端记录或加入黑名单。")
+	if want := "服务端处理登出请求后应立即使当前会话失效，并拒绝后续使用该会话的请求。"; sessionFix != want {
+		t.Fatalf("session remediation=%q, want %q", sessionFix, want)
+	}
+}
+
+func TestRepeatedDeliveryRequestRequiresUnambiguousMatch(t *testing.T) {
+	packet := "POST /api/a HTTP/1.1\n\nPOST /api/a HTTP/1.1\n\nPOST /api/b HTTP/1.1\n\nPOST /api/b HTTP/1.1\n\nPOST /api/b HTTP/1.1"
+	if method, path, count := repeatedDeliveryRequest(packet, "并发提交相同请求"); method != "" || path != "" || count != 0 {
+		t.Fatalf("ambiguous repeated requests selected %s %s x%d", method, path, count)
+	}
+	if method, path, count := repeatedDeliveryRequest(packet, "并发提交 POST /api/a"); method != http.MethodPost || path != "/api/a" || count != 2 {
+		t.Fatalf("matched repeated request=%s %s x%d", method, path, count)
+	}
+	packetWithDifferentBody := strings.Join([]string{
+		"### 第一次并发提交 · 请求",
+		"POST /api/registrations HTTP/1.1\r\nContent-Length: 25\r\n\r\n{\"reference\":\"EVAL-RACE\"}",
+		"### 第二次并发提交 · 请求",
+		"POST /api/registrations HTTP/1.1\r\nContent-Length: 25\r\n\r\n{\"reference\":\"EVAL-RACE\"}",
+		"### 第三次并发提交 · 请求",
+		"POST /api/registrations HTTP/1.1\r\nContent-Length: 25\r\n\r\n{\"reference\":\"EVAL-RACE\"}",
+		"### 缺少业务编号的提交 · 请求",
+		"POST /api/registrations HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}",
+	}, "\n\n")
+	if method, path, count := repeatedDeliveryRequest(packetWithDifferentBody, "并发提交 POST /api/registrations"); method != http.MethodPost || path != "/api/registrations" || count != 3 {
+		t.Fatalf("request bodies were not distinguished: %s %s x%d", method, path, count)
+	}
+}
+
+func TestDeliveryReportConcurrencyRequiresEvidence(t *testing.T) {
+	chain := "请求入口\n   └─ 并发父节点：\n      └─ POST /api/items"
+	if got := normalizeUnsupportedDeliveryConcurrency(chain, map[string]string{"summary": "普通用户修改作业配置"}); strings.Contains(got, "并发") || !strings.Contains(got, "请求关系未验证") {
+		t.Fatalf("unsupported concurrency claim was retained: %q", got)
+	}
+	if !hasExplicitDeliveryConcurrencyEvidence(map[string]string{"summary": "同一账号并发提交3次相同请求"}) {
+		t.Fatal("explicitly tested concurrency was not recognized")
+	}
+	if hasExplicitDeliveryConcurrencyEvidence(map[string]string{"summary": "并发未测试"}) {
+		t.Fatal("unverified concurrency was accepted as evidence")
+	}
+}
+
+func TestNormalizeSyntheticDeliveryReportBurp(t *testing.T) {
+	input := map[string]string{"synthetic": "true", "evidence_transport": "http"}
+	content := "### 发现过程与攻击思路\n合成请求。\n### Burp 复现\n在 Repeater 中替换 X-Eval-Actor 为真实凭证。\n### 失败尝试与未验证项\n未验证。"
+	got := normalizeSyntheticDeliveryReportBurp(input, content)
+	if strings.Contains(got, "替换 X-Eval-Actor") || !strings.Contains(got, "合成请求和身份标记不对应真实目标或会话") || !strings.Contains(got, "### 失败尝试与未验证项") {
+		t.Fatalf("synthetic Repeater guidance was not safely normalized: %q", got)
+	}
+	if unchanged := normalizeSyntheticDeliveryReportBurp(map[string]string{}, content); unchanged != content {
+		t.Fatalf("real-report Burp guidance was changed: %q", unchanged)
 	}
 }
 

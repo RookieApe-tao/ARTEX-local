@@ -601,6 +601,8 @@ func (s *Server) seedOrchestrationTools() {
 	s.upgradeReporterDefaultPromptV3()     // 默认报告使用真人可读内容并自动附加原始报文
 	s.upgradeReporterDeliveryTemplate()    // 默认交付报告升级为真人可读标题和链路图规范
 	s.upgradeReporterDeliveryTemplateV17() // 分离 Markdown 报告与 JSON 草稿规则，避免格式指令冲突
+	s.upgradeReporterDeliveryTemplateV18() // 统一事实整理、影响边界和攻击链顺序要求
+	s.upgradeReporterDeliveryTemplateV19() // 明确接口路径、字数检查和单一修复实现
 	s.upgradeReporterTriggerMessage()      // 老库触发消息同步报告版式与链路图规范
 	s.upgradeReporterTriggerMessageV11()   // 移除触发消息中重复的报告写作规则
 	s.seedFindingTrafficTools()            // 增加可选证据参数及只读证据工具，保留用户配置
@@ -768,7 +770,9 @@ func reporterPromptHashNeedsTemplateUpgrade(hash string) bool {
 		"c6c12f63c6c24062529222027333d59f49ff34e0e18ab464589d31f7b955e813", // v13 默认交付报告提示词
 		"1b97167790b635b784598e7ff380ded5d798843156d9f299fd2db572a2ac53bd", // v14 默认交付报告提示词
 		"5a4985c0a7839ed1a9602d2bfa26342fbce264c0608a46d081ea467904ccbf3e", // v15 默认交付报告提示词
-		"92150e16f0ec293e597f4b5b0631ac1793a5515d93fb614c1449f2c79cae53df": // 当前版重复说明提示词
+		"92150e16f0ec293e597f4b5b0631ac1793a5515d93fb614c1449f2c79cae53df", // 当前版重复说明提示词
+		"786d3a6b59b52c4d998398d297f41091d2db0187d2f47f21c3f531e9ec5489c2", // v17 事实整理提示词
+		"17aa6f65e6d88922dc086b17730357c00b3ef9d55535a85d513eb3cc795ede4e": // v18 事实整理默认提示词
 		return true
 	default:
 		return false
@@ -805,6 +809,72 @@ func (s *Server) upgradeReporterDeliveryTemplateV17() {
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存精简提示词迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV18() {
+	const flag = "reporter_prompt_delivery_template_v18"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取事实整理提示词迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新事实整理交付报告提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已同步事实整理与证据边界规范")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存事实整理提示词迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV19() {
+	const flag = "reporter_prompt_delivery_template_v19"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取报告篇幅与接口路径迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新交付报告篇幅与接口路径要求失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已同步接口路径和正文篇幅要求")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存报告篇幅与接口路径迁移标记失败: %v", err)
 	}
 }
 

@@ -48,9 +48,9 @@ class ReportEvaluationTest(unittest.TestCase):
             report_input = EVAL.read_json(folder / "inputs" / "idor.json")
             material = report_input["material"]
             instruction = report_input["instruction"]
-            self.assertIn("描述、修复建议、测试过程、攻击链路、证据说明", instruction)
-            self.assertIn("Burp 复现", instruction)
-            self.assertIn("缺失信息不补造", instruction)
+            self.assertIn("离线合成材料", instruction)
+            self.assertIn("不调用工具", instruction)
+            self.assertIn("遵循系统提示", instruction)
             self.assertNotIn("测试时间：未记录", instruction)
             self.assertNotIn("必须逐字出现", instruction)
             self.assertNotIn("reference_report", material)

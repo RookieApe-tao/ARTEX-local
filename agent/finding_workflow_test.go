@@ -140,28 +140,30 @@ func TestReporterDefaultPromptUsesMarkdownRulesWithoutJSONContract(t *testing.T)
 
 func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 	for _, required := range []string{
-		"摘要和旧报告只用于找材料",
-		"没有找到恢复操作，不等于无法恢复",
+		"原始请求/响应和命令输出优先于 worker 总结、漏洞摘要和旧报告",
+		"来源冲突或缺项时写明未核实",
 		"详细报告保留工具参数、准确时间、失败日志、哈希和证据索引",
-		"交付报告只保留理解、复现和修复问题所需的信息",
+		"交付报告只留理解、复现和修复所需内容",
 		"时间使用北京时间",
+		"HTTP 状态码或响应头不能证明正文已返回",
+		"CVSS 向量不是影响证据",
+		"评分前提需复核",
+		"只有缺陷行为已由材料确认时，才给对应的代码或配置修复",
+		"结果放在触发它的操作下面",
+		"顺序操作逐级相连，并发操作才并列",
+		"页面入口有记录才写页面",
 		"失败尝试只写实际执行过的操作",
-		"Repeater 串行重放不能验证并发",
-		"不推荐或命名其他工具",
-		"身份关系用“当前用户”“作业所有者”等称呼",
-		"不得建议替换认证字段",
-		"合成身份标记和占位 Cookie 不能证明真实登录",
-		"正文不得抄这些占位值",
-		"不写已读取数据",
-		"不得另行给出冲突的危害等级",
-		"SQL 注入的修复只写参数化查询",
-		"未证明内容敏感时不写信息泄露",
-		"读取到合成内容本身不能证明机密性影响",
-		"重复写入只建议数据库唯一约束",
-		"交付正文最多 800 字符",
+		"Repeater 串行重放不能证明并发",
+		"HTTP 报告必须有 Burp Repeater 小节",
+		"说明重放什么、观察什么，不重抄报文",
+		"回读请求与并发组并列，放在所有并发请求之后",
+		"没有找到恢复操作，不等于无法恢复",
+		"交付正文以 500 字符为目标，最多 800 字符",
+		"X-Eval-Actor 等合成标记不是认证字段",
+		"禁用“判决项”“阴性结果”“如实交付”“零错配”",
 		"平台附加的完整报文不重抄",
-		"终端样本中，id 命令只能说明当前进程身份",
-		"保存前由同一 Reporter 检查",
+		"终端 id 命令只说明当前进程用户",
+		"保存前由同一 Reporter 检查复现条件、观察结果、影响边界、修复依据和链路顺序",
 	} {
 		if !strings.Contains(DeliveryReportWritingRules, required) {
 			t.Fatalf("delivery report guidance is missing %q", required)
@@ -172,7 +174,9 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 			t.Fatalf("delivery report guidance still forces execution ledger fields: %q", forced)
 		}
 	}
-	if strings.Contains(DeliveryReportWritingRules, "JSON 的 description 字段") || !strings.Contains(DeliveryReportDraftRules, "description 先写问题") {
+	if strings.Contains(DeliveryReportWritingRules, "JSON 的 description 字段") || !strings.Contains(DeliveryReportDraftRules, "description 先写问题") ||
+		!strings.Contains(DeliveryReportDraftRules, "cvss_vector 优先使用输入提供的有效向量") ||
+		!strings.Contains(DeliveryReportDraftRules, "顺序操作逐级相连") {
 		t.Fatal("JSON draft format rules must stay separate from the full Markdown Reporter rules")
 	}
 }

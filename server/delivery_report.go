@@ -255,10 +255,72 @@ func stripDeliveryDraftSectionHeading(content, section string) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
+func normalizeDeliveryReportTerminology(content string) string {
+	content = strings.ReplaceAll(content, "文件属主", "文件所有者")
+	return strings.ReplaceAll(content, "属主", "所有者")
+}
+
+func normalizeDeliveryReportRemediation(input map[string]string, remediation string) string {
+	name := strings.ToLower(input["finding_name"])
+	class := strings.ToLower(input["vulnerability_class"])
+	if strings.Contains(name, "盲注") || strings.Contains(name, "sql注入") || strings.Contains(name, "sql injection") ||
+		strings.Contains(name, "sqli") || strings.Contains(class, "sql injection") || strings.Contains(class, "sqli") {
+		return "对相关查询参数使用参数化查询，避免将用户输入拼接进 SQL 语句。"
+	}
+	if strings.Contains(name, "会话") && (strings.Contains(name, "退出") || strings.Contains(name, "登出") || strings.Contains(name, "注销")) {
+		return "服务端处理登出请求后应立即使当前会话失效，并拒绝后续使用该会话的请求。"
+	}
+	return remediation
+}
+
+func hasExplicitDeliveryConcurrencyEvidence(input map[string]string) bool {
+	source := strings.ToLower(input["summary"] + "\n" + input["evidence"])
+	for _, negative := range []string{"未测试并发", "未验证并发", "未执行并发", "并发未测试", "并发未验证", "没有进行并发测试", "没有并发测试"} {
+		if strings.Contains(source, negative) {
+			return false
+		}
+	}
+	for _, positive := range []string{"并发提交", "并发发送", "并发请求", "并发执行", "同时提交", "同时发送", "同时请求", "concurrent request", "concurrently sent"} {
+		if strings.Contains(source, positive) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeUnsupportedDeliveryConcurrency(content string, input map[string]string) string {
+	if hasExplicitDeliveryConcurrencyEvidence(input) {
+		return content
+	}
+	for _, phrase := range []string{"并发父节点", "并发提交", "并发请求", "并发操作", "并发发送"} {
+		content = strings.ReplaceAll(content, phrase, "请求关系未验证")
+	}
+	return content
+}
+
+func normalizeSyntheticDeliveryReportBurp(input map[string]string, content string) string {
+	if input["synthetic"] != "true" || input["evidence_transport"] != "http" {
+		return content
+	}
+	const heading = "### Burp 复现"
+	start := strings.Index(content, heading)
+	if start < 0 {
+		return content
+	}
+	bodyStart := start + len(heading)
+	end := len(content)
+	if next := strings.Index(content[bodyStart:], "\n### "); next >= 0 {
+		end = bodyStart + next
+	}
+	replacement := heading + "\n本次未在 Burp Repeater 发送。合成请求和身份标记不对应真实目标或会话，不能直接重放。真实复测需在授权目标上正常登录并捕获实际请求，再在 Repeater 重放，核对响应和前后数据变化。"
+	return content[:start] + replacement + content[end:]
+}
+
 func normalizeDeliveryDraftSubheadings(content string, headings ...string) string {
 	for _, heading := range headings {
 		marker := "### " + heading
 		position := -1
+		plainLabel := ""
 		scanDeliveryMarkdown(content, func(line string, offset int, code bool) {
 			if position >= 0 || code {
 				return
@@ -268,31 +330,57 @@ func normalizeDeliveryDraftSubheadings(content string, headings ...string) strin
 				return
 			}
 			index := strings.Index(line, marker)
-			if index < 0 {
+			if index >= 0 {
+				boundary := index + len(marker)
+				if boundary < len(line) && line[boundary] != ' ' && line[boundary] != '\t' {
+					if !strings.HasPrefix(line[boundary:], ":") && !strings.HasPrefix(line[boundary:], "：") {
+						return
+					}
+				}
+				position = offset + index
 				return
 			}
-			boundary := index + len(marker)
-			if boundary < len(line) && line[boundary] != ' ' && line[boundary] != '\t' {
-				return
+			for _, label := range []string{heading + "：", heading + ":"} {
+				if index = strings.Index(line, label); index >= 0 {
+					position = offset + index
+					plainLabel = label
+					return
+				}
 			}
-			position = offset + index
 		})
 		if position < 0 {
+			continue
+		}
+		if plainLabel != "" {
+			prefix := strings.TrimRight(content[:position], " \t")
+			suffix := strings.TrimLeft(content[position+len(plainLabel):], " \t")
+			content = prefix + "\n\n" + marker + "\n" + suffix
 			continue
 		}
 		if position > 0 && content[position-1] != '\n' {
 			content = content[:position] + "\n\n" + content[position:]
 			position += 2
 		}
-		afterMarker := position + len(marker)
-		if afterMarker < len(content) && content[afterMarker] != '\n' && content[afterMarker] != '\r' {
-			content = content[:afterMarker] + "\n" + content[afterMarker:]
+		headingEnd := position + len(marker)
+		suffixStart := headingEnd
+		if strings.HasPrefix(content[suffixStart:], "：") {
+			suffixStart += len("：")
+		} else if strings.HasPrefix(content[suffixStart:], ":") {
+			suffixStart++
+		}
+		content = content[:headingEnd] + strings.TrimLeft(content[suffixStart:], " \t")
+		if headingEnd < len(content) && content[headingEnd] != '\n' && content[headingEnd] != '\r' {
+			content = content[:headingEnd] + "\n" + content[headingEnd:]
 		}
 	}
 	return strings.TrimSpace(content)
 }
 
 func ensureDeliveryAttackChainTextFence(content string) string {
+	return ensureDeliveryAttackChainTextFenceWithEvidence(content, "", false)
+}
+
+func ensureDeliveryAttackChainTextFenceWithEvidence(content, requestPacket string, allowConcurrentNormalization bool) string {
 	content = strings.TrimSpace(content)
 	if strings.HasPrefix(content, "```") {
 		lines := strings.Split(content, "\n")
@@ -301,6 +389,9 @@ func ensureDeliveryAttackChainTextFence(content string) string {
 			lines = lines[:len(lines)-1]
 		}
 		content = strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+	if chain, ok := normalizeExplicitDownArrowChain(content); ok {
+		content = chain
 	}
 	lines := strings.Split(content, "\n")
 	nodes := make([]string, 0, len(lines))
@@ -330,8 +421,10 @@ func ensureDeliveryAttackChainTextFence(content string) string {
 	}
 	if !hasTreeBranch && len(nodes) > 1 {
 		content = nodes[0]
+		indent := "   "
 		for _, node := range nodes[1:] {
-			content += "\n   └─ " + node
+			content += "\n" + indent + "└─ " + node
+			indent += "   "
 		}
 	} else {
 		normalizedTree := make([]string, 0, len(treeLines))
@@ -371,7 +464,304 @@ func ensureDeliveryAttackChainTextFence(content string) string {
 		return content
 	}
 	content = strings.Join(normalizeDeliveryAttackTreeBranches(strings.Split(content, "\n")), "\n")
+	content = strings.Join(normalizeFlatDeliveryAttackChain(strings.Split(content, "\n"), requestPacket, allowConcurrentNormalization), "\n")
+	content = strings.Join(normalizeDeliveryAttackTreeBranches(strings.Split(content, "\n")), "\n")
 	return "```text\n" + content + "\n```"
+}
+
+func normalizeExplicitDownArrowChain(content string) (string, bool) {
+	var nodes []string
+	arrows := 0
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || trimmed == "text" {
+			continue
+		}
+		connector := trimmed
+		for _, marker := range []string{"├─", "└─"} {
+			if strings.HasPrefix(connector, marker) {
+				connector = strings.TrimSpace(strings.TrimPrefix(connector, marker))
+				break
+			}
+		}
+		if connector == "↓" {
+			arrows++
+			continue
+		}
+		if node := stripDeliveryAttackTreeNode(trimmed); node != "" {
+			nodes = append(nodes, node)
+		}
+	}
+	if arrows == 0 || len(nodes) < 2 || arrows != len(nodes)-1 {
+		return "", false
+	}
+	chain := nodes[0]
+	indent := "   "
+	for _, node := range nodes[1:] {
+		chain += "\n" + indent + "└─ " + node
+		indent += "   "
+	}
+	return chain, true
+}
+
+type deliveryAttackNode struct {
+	value    string
+	children []*deliveryAttackNode
+}
+
+func normalizeFlatDeliveryAttackChain(lines []string, requestPacket string, allowConcurrentNormalization bool) []string {
+	if len(lines) < 3 {
+		return lines
+	}
+	root := strings.TrimSpace(stripDeliveryAttackTreeNode(lines[0]))
+	if root == "" {
+		return lines
+	}
+	events := make([]string, 0, len(lines)-1)
+	for _, line := range lines[1:] {
+		if node := strings.TrimSpace(stripDeliveryAttackTreeNode(line)); node != "" {
+			events = append(events, node)
+		}
+	}
+	if len(events) == 0 {
+		return lines
+	}
+
+	concurrentIndex := -1
+	for index, event := range events {
+		if strings.Contains(event, "并发") {
+			concurrentIndex = index
+			break
+		}
+	}
+	repeatedMethod, repeatedPath, repeatedCount := "", "", 0
+	if concurrentIndex >= 0 {
+		repeatedMethod, repeatedPath, repeatedCount = repeatedDeliveryRequest(requestPacket, events[concurrentIndex])
+	}
+	if !allowConcurrentNormalization || concurrentIndex < 0 || repeatedCount < 2 || repeatedMethod == http.MethodGet {
+		return lines
+	}
+
+	rootNode := &deliveryAttackNode{value: root}
+	appendChain := func(parent *deliveryAttackNode, value string) *deliveryAttackNode {
+		child := &deliveryAttackNode{value: value}
+		parent.children = append(parent.children, child)
+		return child
+	}
+	parent := rootNode
+	for _, event := range events[:concurrentIndex] {
+		parent = appendChain(parent, event)
+	}
+	groupTitle := events[concurrentIndex]
+	if repeatedCount > 1 {
+		groupTitle = fmt.Sprintf("并发提交 %d 次相同请求", repeatedCount)
+	}
+	group := appendChain(parent, groupTitle)
+	parallelEnd := len(events)
+	for index := concurrentIndex + 1; index < len(events); index++ {
+		if deliveryHTTPMethod(events[index]) == http.MethodGet {
+			parallelEnd = index
+			break
+		}
+	}
+	responseEvents := make([]string, 0, parallelEnd-concurrentIndex-1)
+	hasRequestNode := false
+	for _, event := range events[concurrentIndex+1 : parallelEnd] {
+		if deliveryHTTPMethod(event) != "" {
+			hasRequestNode = true
+			break
+		}
+		responseEvents = append(responseEvents, event)
+	}
+	if !hasRequestNode && len(responseEvents) >= repeatedCount {
+		for index := 0; index < repeatedCount; index++ {
+			request := appendChain(group, repeatedMethod+" "+repeatedPath)
+			appendChain(request, responseEvents[index])
+		}
+		for _, event := range responseEvents[repeatedCount:] {
+			appendChain(group, event)
+		}
+	} else {
+		appendDeliveryConcurrentEvents(group, events, concurrentIndex+1, parallelEnd)
+	}
+	if parallelEnd < len(events) {
+		parent = appendChain(parent, events[parallelEnd])
+		for index := parallelEnd + 1; index < len(events); index++ {
+			parent = appendChain(parent, events[index])
+		}
+	}
+
+	output := []string{rootNode.value}
+	var render func(*deliveryAttackNode, string, bool)
+	render = func(node *deliveryAttackNode, prefix string, last bool) {
+		marker := "├─ "
+		if last {
+			marker = "└─ "
+		}
+		output = append(output, prefix+marker+node.value)
+		childPrefix := prefix + "│  "
+		if last {
+			childPrefix = prefix + "   "
+		}
+		for index, child := range node.children {
+			render(child, childPrefix, index == len(node.children)-1)
+		}
+	}
+	for index, child := range rootNode.children {
+		render(child, "   ", index == len(rootNode.children)-1)
+	}
+	return output
+}
+
+func appendDeliveryConcurrentEvents(group *deliveryAttackNode, events []string, start, end int) {
+	for index := start; index < end; index++ {
+		event := events[index]
+		request := &deliveryAttackNode{value: event}
+		group.children = append(group.children, request)
+		if deliveryHTTPMethod(event) != "" && index+1 < end && deliveryHTTPMethod(events[index+1]) == "" {
+			index++
+			request.children = append(request.children, &deliveryAttackNode{value: events[index]})
+		}
+	}
+}
+
+func stripDeliveryAttackTreeNode(line string) string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimLeft(line, "│ ")
+	for _, marker := range []string{"├─", "└─"} {
+		if strings.HasPrefix(line, marker) {
+			line = strings.TrimSpace(strings.TrimPrefix(line, marker))
+			break
+		}
+	}
+	return strings.TrimSpace(strings.TrimLeft(line, "→↓> "))
+}
+
+func deliveryHTTPMethod(node string) string {
+	fields := strings.Fields(node)
+	if len(fields) < 2 {
+		return ""
+	}
+	switch fields[0] {
+	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions:
+		if strings.HasPrefix(fields[1], "/") {
+			return fields[0]
+		}
+	}
+	return ""
+}
+
+func repeatedDeliveryRequest(packet, group string) (string, string, int) {
+	type request struct {
+		method string
+		path   string
+		count  int
+	}
+	requests := make([]request, 0)
+	indexes := make(map[string]int)
+	for position := 0; position < len(packet); {
+		lineEnd := strings.IndexByte(packet[position:], '\n')
+		if lineEnd < 0 {
+			break
+		}
+		lineEnd += position
+		line := strings.TrimSuffix(packet[position:lineEnd], "\r")
+		fields := strings.Fields(line)
+		if len(fields) < 3 || !strings.HasPrefix(fields[2], "HTTP/") || !strings.HasPrefix(fields[1], "/") {
+			position = lineEnd + 1
+			continue
+		}
+		method := deliveryHTTPMethod(fields[0] + " " + fields[1])
+		if method == "" {
+			position = lineEnd + 1
+			continue
+		}
+
+		bodyStart := -1
+		contentLength := 0
+		validContentLength := true
+		chunked := false
+		cursor := lineEnd + 1
+		for cursor <= len(packet) {
+			headerEnd := strings.IndexByte(packet[cursor:], '\n')
+			if headerEnd < 0 {
+				break
+			}
+			headerEnd += cursor
+			header := strings.TrimSuffix(packet[cursor:headerEnd], "\r")
+			cursor = headerEnd + 1
+			if header == "" {
+				bodyStart = cursor
+				break
+			}
+			name, value, ok := strings.Cut(header, ":")
+			if !ok {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(name)) {
+			case "content-length":
+				parsed, err := strconv.Atoi(strings.TrimSpace(value))
+				if err != nil || parsed < 0 {
+					validContentLength = false
+				} else {
+					contentLength = parsed
+				}
+			case "transfer-encoding":
+				chunked = strings.Contains(strings.ToLower(value), "chunked")
+			}
+		}
+		if bodyStart < 0 {
+			position = cursor
+			continue
+		}
+		bodyEnd := bodyStart
+		if contentLength > 0 {
+			if bodyStart+contentLength > len(packet) {
+				break
+			}
+			bodyEnd += contentLength
+		}
+		if validContentLength && !chunked {
+			signature := packet[position:bodyEnd]
+			key := method + "\x00" + fields[1] + "\x00" + signature
+			index, ok := indexes[key]
+			if !ok {
+				index = len(requests)
+				indexes[key] = index
+				requests = append(requests, request{method: method, path: fields[1]})
+			}
+			requests[index].count++
+		}
+		position = bodyEnd
+	}
+	var repeated []request
+	var matching []request
+	var repeatedWrites []request
+	for _, candidate := range requests {
+		if candidate.count < 2 {
+			continue
+		}
+		repeated = append(repeated, candidate)
+		if candidate.method != http.MethodGet && candidate.method != http.MethodHead && candidate.method != http.MethodOptions {
+			repeatedWrites = append(repeatedWrites, candidate)
+		}
+		if strings.Contains(group, candidate.method+" "+candidate.path) {
+			matching = append(matching, candidate)
+		}
+	}
+	if len(matching) == 1 {
+		return matching[0].method, matching[0].path, matching[0].count
+	}
+	if len(matching) > 1 {
+		return "", "", 0
+	}
+	if len(repeated) == 1 {
+		return repeated[0].method, repeated[0].path, repeated[0].count
+	}
+	if len(repeatedWrites) == 1 {
+		return repeatedWrites[0].method, repeatedWrites[0].path, repeatedWrites[0].count
+	}
+	return "", "", 0
 }
 
 func normalizeDeliveryAttackTreeBranches(lines []string) []string {
@@ -485,8 +875,20 @@ func parseDeliveryReportDraft(
 	draft.Remediation = stripDeliveryDraftSectionHeading(draft.Remediation, "修复")
 	draft.TestProcess = stripDeliveryDraftSectionHeading(draft.TestProcess, "测试过程")
 	draft.AttackChain = stripDeliveryDraftSectionHeading(draft.AttackChain, "攻击链路")
-	draft.AttackChain = ensureDeliveryAttackChainTextFence(draft.AttackChain)
+	draft.AttackChain = ensureDeliveryAttackChainTextFenceWithEvidence(
+		draft.AttackChain,
+		input["request_packet"],
+		hasExplicitDeliveryConcurrencyEvidence(input),
+	)
+	draft.AttackChain = normalizeUnsupportedDeliveryConcurrency(draft.AttackChain, input)
 	draft.DiscoveryPath = stripDeliveryDraftSectionHeading(draft.DiscoveryPath, "证据说明")
+	draft.Remediation = normalizeDeliveryReportRemediation(input, draft.Remediation)
+	draft.Description = normalizeDeliveryReportTerminology(draft.Description)
+	draft.Remediation = normalizeDeliveryReportTerminology(draft.Remediation)
+	draft.TestProcess = normalizeDeliveryReportTerminology(draft.TestProcess)
+	draft.TestProcess = normalizeSyntheticDeliveryReportBurp(input, draft.TestProcess)
+	draft.AttackChain = normalizeDeliveryReportTerminology(draft.AttackChain)
+	draft.DiscoveryPath = normalizeDeliveryReportTerminology(draft.DiscoveryPath)
 	if draft.Description == "" || draft.Remediation == "" || draft.TestProcess == "" ||
 		draft.AttackChain == "" || draft.DiscoveryPath == "" {
 		return deliveryReportDraft{}, &deliveryReportOutputError{

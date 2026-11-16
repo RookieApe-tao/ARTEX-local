@@ -8,7 +8,7 @@ CVSS 4.0：CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N  评�
 需要已登录账号，已观察到的是重复登记和记录数增加；其他影响未验证。
 
 ## 修复建议
-服务端按业务编号实施唯一约束或幂等处理，重复提交返回首次创建的记录。源码位置未核实。
+在数据库中为业务编号建立唯一约束。重复提交返回冲突，不再生成新记录。源码位置未核实。
 
 ## 测试过程
 ### 发现过程与攻击思路
@@ -20,10 +20,18 @@ CVSS 4.0：CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N  评�
 
 ## 攻击链路
 ```text
-普通用户提交业务登记
-└─ 三次提交相同业务编号
-   └─ POST /api/registrations
-      └─ 回读记录由 0 条增至 3 条，ID 不同
+提交前基线
+└─ GET /api/registrations?reference=EVAL-RACE
+   └─ total=0
+      ├─ 并发提交 3 次相同业务编号
+      │  ├─ POST /api/registrations（第一次）
+      │  │  └─ HTTP 201，id=reg-1
+      │  ├─ POST /api/registrations（第二次）
+      │  │  └─ HTTP 201，id=reg-2
+      │  └─ POST /api/registrations（第三次）
+      │     └─ HTTP 201，id=reg-3
+      └─ 回读 GET /api/registrations?reference=EVAL-RACE
+         └─ total=3，三条记录的 ID 不同
 ```
 
 ## 证据说明

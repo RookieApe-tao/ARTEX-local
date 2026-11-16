@@ -82,6 +82,12 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptHashNeedsTemplateUpgrade("92150e16f0ec293e597f4b5b0631ac1793a5515d93fb614c1449f2c79cae53df") {
 		t.Fatal("previous default prompt with duplicated JSON and Markdown rules would not receive the migration")
 	}
+	if !reporterPromptHashNeedsTemplateUpgrade("786d3a6b59b52c4d998398d297f41091d2db0187d2f47f21c3f531e9ec5489c2") {
+		t.Fatal("previous v17 default prompt would not receive the unified fact and evidence rules")
+	}
+	if !reporterPromptHashNeedsTemplateUpgrade("17aa6f65e6d88922dc086b17730357c00b3ef9d55535a85d513eb3cc795ede4e") {
+		t.Fatal("previous v18 default prompt would not receive the updated length and endpoint rules")
+	}
 	previous, err := os.ReadFile("testdata/reporter-default-v3.txt")
 	if err != nil {
 		t.Fatal(err)
