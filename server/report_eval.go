@@ -49,12 +49,11 @@ func (s *Server) reportEvalInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	systemHash := sha256.Sum256([]byte(deliveryReportCompletionSystem()))
-	reviewSystemHash := sha256.Sum256([]byte(deliveryReportReviewSystem()))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"model": cfg.Model, "provider_source": source, "format": cfg.Format,
 		"thinking_type": cfg.ThinkingType, "reasoning_effort": cfg.ReasoningEffort,
-		"case_ids": reporteval.IDs(), "max_output_tokens": reportEvalMaxTokens, "completion_passes": 2,
-		"system_sha256": hex.EncodeToString(systemHash[:]), "review_system_sha256": hex.EncodeToString(reviewSystemHash[:]),
+		"case_ids": reporteval.IDs(), "max_output_tokens": reportEvalMaxTokens, "completion_passes": 1,
+		"system_sha256": hex.EncodeToString(systemHash[:]),
 	})
 }
 

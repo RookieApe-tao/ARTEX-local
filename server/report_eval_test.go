@@ -78,8 +78,8 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if info.Code != http.StatusOK || !strings.Contains(info.Body.String(), "fixed-test-model") ||
 		!strings.Contains(info.Body.String(), `"thinking_type":"enabled"`) ||
 		!strings.Contains(info.Body.String(), `"reasoning_effort":"high"`) ||
-		!strings.Contains(info.Body.String(), `"completion_passes":2`) ||
-		!strings.Contains(info.Body.String(), `"review_system_sha256"`) ||
+		!strings.Contains(info.Body.String(), `"completion_passes":1`) ||
+		strings.Contains(info.Body.String(), `"review_system_sha256"`) ||
 		strings.Contains(info.Body.String(), "must-not-be-exposed") {
 		t.Fatalf("metadata response status=%d body=%s", info.Code, info.Body.String())
 	}
@@ -87,8 +87,8 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("sample request status=%d body=%s", response.Code, response.Body.String())
 	}
-	if provider.calls != 2 {
-		t.Fatalf("model call count=%d, want draft and evidence review", provider.calls)
+	if provider.calls != 1 {
+		t.Fatalf("model call count=%d, want one report generation call", provider.calls)
 	}
 	if len(provider.request.Tools) != 0 {
 		t.Fatalf("evaluation request exposed %d tools", len(provider.request.Tools))
@@ -99,8 +99,8 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if provider.request.MaxTokens != deliveryReportMaxTokens {
 		t.Fatalf("evaluation max tokens=%d, want %d", provider.request.MaxTokens, deliveryReportMaxTokens)
 	}
-	if len(provider.request.System) != 1 || !strings.Contains(provider.request.System[0], "证据审阅人") {
-		t.Fatal("final model call did not receive the evidence-review instructions")
+	if len(provider.request.System) != 1 || !strings.Contains(provider.request.System[0], "保存前由同一 Reporter 自查") {
+		t.Fatal("report generation call did not receive the same-Reporter self-check instructions")
 	}
 	prompt := provider.request.Messages[0].Text()
 	for _, forbidden := range []string{"reference_report", "must_preserve", "must_not_claim", `"id":"E`} {
@@ -127,7 +127,7 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Model != "fixed-test-model" || result.Usage.InputTokens != 34 || result.Usage.OutputTokens != 46 || result.Draft.RequestPacket == "" {
+	if result.Model != "fixed-test-model" || result.Usage.InputTokens != 17 || result.Usage.OutputTokens != 23 || result.Draft.RequestPacket == "" {
 		t.Fatalf("incomplete evaluation response: %+v", result)
 	}
 }
@@ -291,57 +291,6 @@ func TestDeliveryReportCompletionUsesProvidedCVSSVectorHint(t *testing.T) {
 	}
 }
 
-func TestReviewDeliveryReportMarkdownValidatesReviewedReport(t *testing.T) {
-	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
-	report := deliveryReportFixture("已观察到的结果。", vector)
-	encoded, err := json.Marshal(map[string]string{"report": report})
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider := &reportEvalProvider{result: string(encoded)}
-	got, err := reviewDeliveryReportMarkdown(context.Background(), map[string]string{"evidence": "原始证据"}, report, vector, provider.Complete)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != report || provider.calls != 1 {
-		t.Fatalf("reviewed report or call count mismatch: calls=%d report=%q", provider.calls, got)
-	}
-	if len(provider.request.System) != 1 || !strings.Contains(provider.request.System[0], "证据审阅人") {
-		t.Fatal("report save did not use the evidence-review instructions")
-	}
-	if !strings.Contains(provider.request.Messages[0].Text(), "原始证据") {
-		t.Fatal("review request omitted source evidence")
-	}
-}
-
-func TestReviewDeliveryReportMarkdownRejectsChangedCVSSVector(t *testing.T) {
-	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
-	changed := "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N"
-	report := deliveryReportFixture("已观察到的结果。", changed)
-	encoded, err := json.Marshal(map[string]string{"report": report})
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider := &reportEvalProvider{result: string(encoded)}
-	if _, err := reviewDeliveryReportMarkdown(context.Background(), nil, report, vector, provider.Complete); err == nil {
-		t.Fatal("reviewed report with changed CVSS vector was accepted")
-	}
-}
-
-func TestReviewDeliveryReportMarkdownRejectsChangedTitle(t *testing.T) {
-	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
-	report := deliveryReportFixture("已观察到的结果。", vector)
-	changed := strings.Replace(report, "# 测试系统-模块 /test 测试缺陷：测试结果", "# 另一个系统 /other 其他问题：测试结果", 1)
-	encoded, err := json.Marshal(map[string]string{"report": changed})
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider := &reportEvalProvider{result: string(encoded)}
-	if _, err := reviewDeliveryReportMarkdown(context.Background(), nil, report, vector, provider.Complete); err == nil {
-		t.Fatal("reviewed report with changed finding title was accepted")
-	}
-}
-
 func TestStripDeliveryDraftSectionHeading(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -391,7 +340,7 @@ func TestEnsureDeliveryAttackChainTextFence(t *testing.T) {
 
 func TestDeliveryReportDraftDisablesConfiguredResponsesReasoning(t *testing.T) {
 	modelDraft := `{"cvss_vector":"CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:L/SC:N/SI:L/SA:N","description":"问题描述。\n### 定级依据\n有可复核证据。","remediation":"在服务端校验资源归属。","test_process":"### 发现过程与攻击思路\n用 Burp Repeater 重放样本请求。\n### 失败尝试与未验证项\n批量编号未验证。\n### Burp 复现\n按授权账号复测。","attack_chain":"普通用户\n└─ 修改请求\n   └─ 其他用户数据发生变化","discovery_path":"来源为合成材料。\n### 复测标准\n跨用户请求应被拒绝。"}`
-	receivedCh := make(chan map[string]json.RawMessage, 2)
+	receivedCh := make(chan map[string]json.RawMessage, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
 			t.Errorf("request path=%q, want /v1/responses", r.URL.Path)
@@ -437,29 +386,27 @@ func TestDeliveryReportDraftDisablesConfiguredResponsesReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for index := 0; index < 2; index++ {
-		received := <-receivedCh
-		var request struct {
-			Instructions string `json:"instructions"`
-			Reasoning    struct {
-				Effort string `json:"effort"`
-			} `json:"reasoning"`
-		}
-		receivedJSON, err := json.Marshal(received)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(receivedJSON, &request); err != nil {
-			t.Fatal(err)
-		}
-		if request.Reasoning.Effort != "none" {
-			t.Fatalf("Responses API reasoning effort=%q, want none", request.Reasoning.Effort)
-		}
-		if index == 1 && !strings.Contains(request.Instructions, "证据审阅人") {
-			t.Fatal("second model pass did not use the evidence-review system prompt")
-		}
+	received := <-receivedCh
+	var request struct {
+		Instructions string `json:"instructions"`
+		Reasoning    struct {
+			Effort string `json:"effort"`
+		} `json:"reasoning"`
 	}
-	if draft.Description == "" || usage.OutputTokens != 840 {
+	receivedJSON, err := json.Marshal(received)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(receivedJSON, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Reasoning.Effort != "none" {
+		t.Fatalf("Responses API reasoning effort=%q, want none", request.Reasoning.Effort)
+	}
+	if !strings.Contains(request.Instructions, "保存前由同一 Reporter 自查") {
+		t.Fatal("report request did not include the same-Reporter self-check rules")
+	}
+	if draft.Description == "" || usage.OutputTokens != 420 {
 		t.Fatalf("draft=%+v usage=%+v", draft, usage)
 	}
 }

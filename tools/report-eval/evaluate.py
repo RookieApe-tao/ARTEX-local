@@ -243,7 +243,6 @@ def run_live(args):
         corpus[cid] = digest(json.dumps(material, ensure_ascii=False, sort_keys=True))
         write_json(target / "inputs" / f"{cid}.json", {
             "system_sha256": info.get("system_sha256"),
-            "review_system_sha256": info.get("review_system_sha256"),
             "material": material,
             "tools": [],
         })
@@ -270,7 +269,6 @@ def run_live(args):
             "tools": 0,
         },
         "policy_sha256": info.get("system_sha256"),
-        "review_policy_sha256": info.get("review_system_sha256"),
         "corpus_sha256": corpus,
         "results": {},
         "failures": {},
