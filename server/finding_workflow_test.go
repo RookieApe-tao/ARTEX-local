@@ -315,7 +315,7 @@ func TestFindingWorkflowReporterBindsBeforeWritingReport(t *testing.T) {
 	}
 	off, offDef, closeOff := agent.AugmentTools(ctx, "reporter", nil)
 	defer closeOff()
-	if !strings.Contains(offDef.FindingGuidance, agent.DeliveryReportRuntimeGuidance) || !strings.Contains(offDef.FindingGuidance, agent.DeliveryReportStyleGuidance) || strings.Contains(offDef.FindingGuidance, "报告前自动关联流量") {
+	if !strings.Contains(offDef.FindingGuidance, agent.DeliveryReportRuntimeGuidance) || !strings.Contains(offDef.FindingGuidance, agent.DeliveryReportEvidenceGuidance) || !strings.Contains(offDef.FindingGuidance, agent.DeliveryReportStyleGuidance) || strings.Contains(offDef.FindingGuidance, "报告前自动关联流量") {
 		t.Fatal("off reporter lost report writing guidance or still receives auto-binding guidance")
 	}
 	for _, tool := range off {

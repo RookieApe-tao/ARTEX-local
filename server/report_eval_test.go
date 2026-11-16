@@ -306,10 +306,14 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"平台会添加 text 代码围栏",
 		"首条证据请求采集时间",
 		"不改变详细报告的章节和台账",
+		"动笔前先从原始请求/响应、命令输出和执行记录整理事实",
+		"根因（只有源码、配置或日志能证明时才填写，否则记为未知）",
+		"不得称为真实用户资料、敏感数据或实际泄露",
+		"行为尚未确认时只列补证步骤",
 		"修复建议只写一项与已确认行为相符的主要措施",
-		"不得让人替换 Host、认证头或样本占位值",
-		"正文以 800 字以内为目标，不硬截断",
-		"前后查询按时间顺序展示",
+		"不得建议把样本 Host、身份、认证头、Cookie 或 Token 替换成真实值",
+		"正文尽量控制在 800 字以内，不硬截断",
+		"真假条件、有效与无效凭证等对照请求并列，不画成互相依赖",
 		"### 定级依据",
 		"### 发现过程与攻击思路",
 		"### 失败尝试与未验证项",
@@ -633,7 +637,7 @@ func TestDeliveryReportDraftDisablesConfiguredResponsesReasoning(t *testing.T) {
 		t.Fatal(err)
 	}
 	if request.Reasoning.Effort != "none" {
-		t.Fatalf("Responses API reasoning effort=%q, want none", request.Reasoning.Effort)
+		t.Fatalf("Responses API reasoning effort=%q, want none for strict JSON output", request.Reasoning.Effort)
 	}
 	if !strings.Contains(request.Instructions, "保存前在本次输出中核对结论、限制、修复和链路") {
 		t.Fatal("report request did not include the same-Reporter self-check rules")

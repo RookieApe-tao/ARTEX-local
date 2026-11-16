@@ -442,6 +442,9 @@ const previousFindingReportToolDescriptionTemplateV7 = "为已登记的漏洞一
 const previousDeliveryReportSaveGuidanceV8 = "交付报告须包含一个漏洞名称一级标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：描述、修复建议、测试过程、攻击链路、证据说明。不要添加三级标题或重复栏目。测试过程必须各有一行“测试时间：”和“执行工具：”；没有记录时分别写“未记录”。还须说明参数、结果、判据、失败尝试与未验证项。HTTP 问题须写明 Burp Repeater 的实际使用状态；非 HTTP 问题只说明 Burp 不适用；协议未确认时写“协议未确认，Burp Repeater 复测未验证”，不猜协议也不写复现步骤。合成身份标记不是凭证，不要抄写或建议替换。已绑定 HTTP 请求和响应由 ARTEX 原文附加，不要重复粘贴。用简短中文写清问题、影响和修复。"
 const previousFindingReportToolDescriptionTemplateV8 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + previousDeliveryReportSaveGuidanceV8 + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
+const previousDeliveryReportSaveGuidanceV9 = "以下结构和写作要求只适用于交付报告字段；详细报告仍保留原有章节和完整台账。交付报告须包含一个漏洞名称标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：" + agent.DeliveryReportSectionOrder + "。描述含“定级依据”；测试过程含“发现过程与攻击思路”“失败尝试与未验证项”“Burp 复现”；证据说明含“复测标准”。正文尽量简短，通常不超过 800 字；复杂案例可超过，不得删掉关键证据来凑长度。测试时间按记录换算为北京时间，缺失时写“未记录”。HTTP 问题说明 Burp Repeater 的实际使用情况或复测步骤。ARTEX 会附加完整原始请求和响应，不要在正文重复转述。"
+const previousFindingReportToolDescriptionTemplateV9 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + previousDeliveryReportSaveGuidanceV9 + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
+
 const findingReportToolDescription = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + agent.DeliveryReportSaveGuidance + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
 func previousFindingReportToolDescriptions() []string {
@@ -455,6 +458,7 @@ func previousFindingReportToolDescriptions() []string {
 		previousFindingReportToolDescriptionTemplateV6,
 		previousFindingReportToolDescriptionTemplateV7,
 		previousFindingReportToolDescriptionTemplateV8,
+		previousFindingReportToolDescriptionTemplateV9,
 	}
 }
 
@@ -604,6 +608,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.upgradeReporterDeliveryTemplateV18() // 统一事实整理、影响边界和攻击链顺序要求
 	s.upgradeReporterDeliveryTemplateV19() // 明确接口路径、字数检查和单一修复实现
 	s.upgradeReporterDeliveryTemplateV20() // 更新共享攻击链规范，避免旧默认提示词重复叠加
+	s.upgradeReporterDeliveryTemplateV21() // 收紧合成样本、根因和未验证影响的表述
 	s.upgradeReporterTriggerMessage()      // 老库触发消息同步报告版式与链路图规范
 	s.upgradeReporterTriggerMessageV11()   // 移除触发消息中重复的报告写作规则
 	s.seedFindingTrafficTools()            // 增加可选证据参数及只读证据工具，保留用户配置
@@ -774,7 +779,8 @@ func reporterPromptHashNeedsTemplateUpgrade(hash string) bool {
 		"92150e16f0ec293e597f4b5b0631ac1793a5515d93fb614c1449f2c79cae53df", // 当前版重复说明提示词
 		"786d3a6b59b52c4d998398d297f41091d2db0187d2f47f21c3f531e9ec5489c2", // v17 事实整理提示词
 		"17aa6f65e6d88922dc086b17730357c00b3ef9d55535a85d513eb3cc795ede4e", // v18 事实整理默认提示词
-		"2e629b3e35fcab552a9a901419af419dfb721ebf15a654e9f8443f1c44d2d3ee": // v19 旧版 Reporter 默认提示词
+		"2e629b3e35fcab552a9a901419af419dfb721ebf15a654e9f8443f1c44d2d3ee", // v19 旧版 Reporter 默认提示词
+		"29a290fbc2d42bce7cf282b8c4da46605ee4deac38b9cf7df2500dad13d8171f": // v20 旧版 Reporter 默认提示词
 		return true
 	default:
 		return false
@@ -910,6 +916,53 @@ func (s *Server) upgradeReporterDeliveryTemplateV20() {
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存共享链路提示词迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV21() {
+	const flag = "reporter_prompt_delivery_template_v21"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取证据边界提示词迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	previousDescriptions := previousFindingReportToolDescriptions()
+	placeholders := make([]string, len(previousDescriptions))
+	args := make([]any, 1, len(previousDescriptions)+1)
+	args[0] = findingReportToolDescription
+	for index, description := range previousDescriptions {
+		placeholders[index] = fmt.Sprintf("$%d", index+2)
+		args = append(args, description)
+	}
+	query := fmt.Sprintf(`UPDATE tools SET description=$1,updated_at=now()
+		WHERE key='update_finding_report' AND system AND description IN (%s)`, strings.Join(placeholders, ","))
+	if _, err := s.m.pg.Exec(query, args...); err != nil {
+		log.Printf("[reporter] 更新报告工具证据边界说明失败: %v", err)
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新报告证据边界要求失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已同步证据、根因和样本影响边界")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存证据边界提示词迁移标记失败: %v", err)
 	}
 }
 

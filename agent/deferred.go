@@ -25,6 +25,9 @@ func deferredSystem(sysText string, def DeferredInfo) (system []string, boundary
 	if strings.Contains(sysText, DeliveryReportChainGuidance) {
 		guidance = strings.Replace(guidance, DeliveryReportChainGuidance, "", 1)
 	}
+	if strings.Contains(sysText, DeliveryReportEvidenceGuidance) {
+		guidance = strings.Replace(guidance, DeliveryReportEvidenceGuidance, "", 1)
+	}
 	if strings.Contains(sysText, DeliveryReportStyleGuidance) {
 		guidance = strings.Replace(guidance, DeliveryReportStyleGuidance, "", 1)
 	}

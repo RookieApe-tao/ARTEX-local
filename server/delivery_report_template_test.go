@@ -94,6 +94,10 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptHashNeedsTemplateUpgrade(previousV19Hash) {
 		t.Fatal("previous v19 stock prompt would keep duplicating the shared chain rules")
 	}
+	const previousV20Hash = "29a290fbc2d42bce7cf282b8c4da46605ee4deac38b9cf7df2500dad13d8171f"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV20Hash) {
+		t.Fatal("previous v20 stock prompt would miss the updated evidence boundaries")
+	}
 	if reporterPromptNeedsTemplateUpgrade("previous v19 stock prompt\n用户自定义要求。") {
 		t.Fatal("an edited v19 prompt must not be migrated over")
 	}
@@ -172,8 +176,8 @@ func TestReporterTriggerUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T)
 
 func TestReporterToolDescriptionUpgradeRecognizesPreviousVersions(t *testing.T) {
 	previous := previousFindingReportToolDescriptions()
-	if len(previous) != 9 {
-		t.Fatalf("expected nine historical tool descriptions, got %d", len(previous))
+	if len(previous) != 10 {
+		t.Fatalf("expected ten historical tool descriptions, got %d", len(previous))
 	}
 	for _, description := range previous {
 		if !reporterToolDescriptionNeedsTemplateUpgrade(description) {

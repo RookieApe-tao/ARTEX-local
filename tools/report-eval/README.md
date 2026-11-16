@@ -26,7 +26,7 @@
 2. 离线对照仍可在独立会话中执行 `inputs/` 的材料，并手动收集模型输出。若要用本地 ARTEX 的当前报告模型跑六例，在本地镜像已构建后，临时开启评测接口并重建容器：
 
    ```sh
-   ARTEX_VERSION=0.3.17 ARTEX_REPORT_EVAL_ENABLED=true \
+   ARTEX_VERSION=0.3.18 ARTEX_REPORT_EVAL_ENABLED=true \
      docker compose -f docker-compose.yml -f docker-compose.local.yml up -d artex
    python3 tools/report-eval/evaluate.py run-live \
      --base-url http://127.0.0.1:8787 \
@@ -37,7 +37,7 @@
    脚本要求输入 ARTEX 本地密码。它只连接 `localhost`、`127.0.0.1` 或 `::1`，先校验服务端和本地的固定样本编号一致，再逐例执行一次无工具模型调用。模型标识、协议、推理开关/强度、写作提示词哈希、token 和耗时会写入输出目录。生成规则要求 Reporter 在这次调用中核对事实和报告结构；这项自查不保证模型不会出错，仍需逐份人工语义审阅。单例失败会被记录，脚本继续其他样本，最后以非零状态提示未完成；`report-evaluation.json` 会标出失败项，成功样稿仍可审阅。若模型返回了无法解析的正文，原文保存在 `raw-responses/`，并在 `diagnostics/` 记录 stop reason、内容块类型和输出 token 数；诊断不包含 reasoning 正文或凭据。完成后关闭接口并重启容器：
 
    ```sh
-   ARTEX_VERSION=0.3.17 ARTEX_REPORT_EVAL_ENABLED=false \
+   ARTEX_VERSION=0.3.18 ARTEX_REPORT_EVAL_ENABLED=false \
      docker compose -f docker-compose.yml -f docker-compose.local.yml up -d artex
    ```
 
