@@ -192,6 +192,71 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertFalse(measured["attack_chain_single_root"])
         self.assertEqual(measured["attack_chain_disconnected_nodes"], ["POST /api/jobs/job-a/types"])
 
+    def test_non_http_attack_chain_commands_must_match_exact_evidence(self):
+        case = EVAL.cases_by_id()["non-http"]
+        headings = [
+            "# 本地文件权限问题",
+            "## 描述",
+            "### 定级依据",
+            "## 修复建议",
+            "## 测试过程",
+            "测试时间：2026-11-01 10:00:00（北京时间）",
+            "### 发现过程与攻击思路",
+            "### 失败尝试与未验证项",
+            "### Burp 复现",
+            "## 攻击链路",
+        ]
+        commands = [item["command"] for item in case["evidence"]]
+        valid_chain = "\n".join([
+            "```text",
+            "本地文件权限验证",
+            f"├─ {commands[0]} → 当前用户信息",
+            *[f"├─ {command}" for command in commands[1:]],
+            "```",
+            "## 证据说明",
+            "### 复测标准",
+        ])
+        valid = EVAL.metrics(case, EVAL.attach_evidence(case, "\n".join(headings + [valid_chain])))
+        self.assertTrue(valid["attack_chain_shell_commands_match_evidence"])
+        self.assertFalse(valid["attack_chain_shell_commands_not_found"])
+        self.assertFalse(valid["attack_chain_shell_commands_missing"])
+
+        concise_chain = "\n".join([
+            "```text",
+            "本地文件权限验证",
+            *[f"├─ {command}" for command in commands[1:]],
+            "```",
+        ])
+        concise = EVAL.metrics(
+            case, EVAL.attach_evidence(case, "\n".join(headings + [concise_chain]))
+        )
+        self.assertTrue(concise["attack_chain_shell_commands_match_evidence"])
+        self.assertEqual(concise["attack_chain_shell_commands_missing"], commands[:1])
+
+        inaccurate_chain = "\n".join([
+            "```text",
+            "本地文件权限验证",
+            "├─ id / whoami",
+            "├─ ls -l backups/customer-notes.txt",
+            "├─ cat backups/customer-notes.txt",
+            "└─ cat backups/private-notes.txt",
+            "```",
+        ])
+        inaccurate = EVAL.metrics(
+            case, EVAL.attach_evidence(case, "\n".join(headings + [inaccurate_chain]))
+        )
+        self.assertFalse(inaccurate["attack_chain_shell_commands_match_evidence"])
+        self.assertEqual(
+            inaccurate["attack_chain_shell_commands_not_found"],
+            [
+                "id / whoami",
+                "ls -l backups/customer-notes.txt",
+                "cat backups/customer-notes.txt",
+                "cat backups/private-notes.txt",
+            ],
+        )
+        self.assertEqual(inaccurate["attack_chain_shell_commands_missing"], commands)
+
     def test_live_evaluation_only_accepts_loopback_and_renders_cvss_header(self):
         for url in ("https://example.com", "http://127.0.0.1.evil.test:8787", "http://user:placeholder@127.0.0.1:8787"):
             with self.subTest(url=url), self.assertRaises(ValueError):

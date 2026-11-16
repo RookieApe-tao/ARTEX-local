@@ -27,6 +27,12 @@ SUBHEADINGS = [
     ("证据说明", "复测标准"),
 ]
 DIMENSIONS = ["事实准确", "容易理解", "可以复现", "影响边界", "修复具体"]
+SHELL_COMMAND_NAMES = {
+    "awk", "bash", "cat", "chmod", "chown", "curl", "cut", "docker",
+    "find", "grep", "head", "id", "jq", "ls", "mkdir", "mv", "nc",
+    "netstat", "nmap", "ping", "ps", "pwd", "python", "python3", "rm",
+    "sed", "sh", "ss", "stat", "sudo", "tail", "tar", "touch", "whoami",
+}
 INSTRUCTION = (
     "只根据附带的离线合成材料写一份交付报告；不调用工具、不执行命令、不访问网络。"
     "遵循系统提示中的固定结构和事实边界，只写材料明确支持的事实，不补造测试动作、身份、影响或实现根因。"
@@ -531,6 +537,12 @@ def metrics(case, report):
     )
     chain_text = chain_match.group(1) if chain_match else ""
     chain_requests = []
+    chain_shell_commands = []
+    evidence_command_names = {
+        Path(item["command"].split(maxsplit=1)[0]).name
+        for item in case["evidence"]
+        if item.get("command")
+    }
     chain_roots = 0
     chain_disconnected_nodes = []
     for block in re.findall(r"```[^\n]*\n(.*?)```", chain_text, re.S):
@@ -551,6 +563,13 @@ def metrics(case, report):
             )
             if request:
                 chain_requests.append(f"{request.group(1)} {request.group(2)}")
+            if case["kind"] == "non_http":
+                command = re.match(r"^([A-Za-z0-9_./+-]+)(?=\s|$)", node)
+                if command and (
+                    command.group(1) in SHELL_COMMAND_NAMES
+                    or Path(command.group(1)).name in evidence_command_names
+                ):
+                    chain_shell_commands.append(node)
     evidence_requests = set()
     if case["kind"] == "http":
         for item in case["evidence"]:
@@ -563,6 +582,24 @@ def metrics(case, report):
     missing_chain_requests = [item for item in chain_requests if item not in evidence_requests]
     if case["kind"] == "http" and not chain_requests:
         missing_chain_requests.append("攻击链中没有 HTTP 请求节点")
+    unmatched_shell_commands = []
+    missing_shell_commands = []
+    if case["kind"] == "non_http":
+        remaining_commands = [
+            item["command"] for item in case["evidence"] if item.get("command")
+        ]
+        for node in chain_shell_commands:
+            for index, expected in enumerate(remaining_commands):
+                suffix = node[len(expected):] if node.startswith(expected) else None
+                if node == expected or (
+                    suffix is not None
+                    and suffix.startswith((" →", " ->", "：", " 结果："))
+                ):
+                    remaining_commands.pop(index)
+                    break
+            else:
+                unmatched_shell_commands.append(node)
+        missing_shell_commands = remaining_commands
     preserved, missing = [], []
     for material in case["evidence"]:
         fields = ("request", "response") if case["kind"] == "http" else ("command", "stdout", "stderr")
@@ -608,6 +645,20 @@ def metrics(case, report):
             not missing_chain_requests if case["kind"] == "http" else None
         ),
         "attack_chain_request_paths_not_found": missing_chain_requests,
+        "attack_chain_shell_commands": (
+            chain_shell_commands if case["kind"] == "non_http" else None
+        ),
+        "attack_chain_shell_commands_not_found": (
+            unmatched_shell_commands if case["kind"] == "non_http" else None
+        ),
+        "attack_chain_shell_commands_missing": (
+            missing_shell_commands if case["kind"] == "non_http" else None
+        ),
+        "attack_chain_shell_commands_match_evidence": (
+            not unmatched_shell_commands
+            if case["kind"] == "non_http"
+            else None
+        ),
         "semantic_quality": "未自动判定；原文匹配和字数不能证明结论正确或文字易读",
     }
 
