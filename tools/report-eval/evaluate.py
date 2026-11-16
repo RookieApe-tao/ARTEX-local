@@ -33,9 +33,10 @@ INSTRUCTION = (
     "交付正文简短说明漏洞、影响、复现和修复；不要抄写请求、响应或终端原文，评测器会像 ARTEX 一样在报告末尾附加原始材料。"
     "只记录材料中有依据的时间、工具、参数和结果；缺失信息不补造，未执行或未复现的项目标为未验证。"
     "账号、权限和会话形式只能使用材料明确记载的内容，不要新增账号或猜 Cookie、Token、认证头格式。"
-    "只有状态码或响应头时不能称为未鉴权或数据泄露；证据不足时先补证，不直接下修复结论。真假条件响应差异不等于已提取数据。并发漏洞不得建议用 Repeater 串行发送证明并发。"
+    "只有状态码或响应头时不能称为未鉴权或数据泄露；证据不足时先补证，不直接下修复结论。真假常量响应差异不等于已读取数据；未测字段条件时，不声称能读取字段或探测数据。并发漏洞不得建议用 Repeater 串行发送证明并发。"
     "HTTP 案例在“Burp 复现”中给出基于附加请求的简短操作步骤和可观察判据，并区分实际测试与建议复测；没有 Burp 执行记录时明确标为未验证。并发问题说明真实并发方式，不能用 Repeater 串行重放证明。非 HTTP 案例说明 Burp 不适用。"
-    "X-Eval-Actor 是合成身份标记，不是凭证，不要把它写成真实账号或认证材料。修复建议只针对证据支持的根因，不猜源码路径或实现。"
+    "X-Eval-Actor 是合成身份标记，不是凭证，也不能用替换标记模拟切换账号。不能由此推断真实登录身份。证据不含真实认证材料时，不猜 Cookie、Token 或请求头，不写修改凭证的 Repeater 步骤；建议分别用获授权账号正常登录后捕获各自请求。待核实线索先说明需要补取的证据，不写条件式代码修复。修复建议只针对证据支持的根因，不猜源码路径或实现，只给一个主要修复动作。"
+    "报告保持简短：通常一段描述、一个修复动作、最多四步测试；非关键未验证项合并说明。攻击链中的并列请求共用父节点，分支缩进对齐。"
     "攻击链只写简短中文树形内容，不要输出代码围栏、“text”标签、方括号标签或英文占位词。非 HTTP 案例只说明命令和输出，不得声称有 HTTP 请求或响应包。"
 )
 
@@ -242,6 +243,7 @@ def run_live(args):
         corpus[cid] = digest(json.dumps(material, ensure_ascii=False, sort_keys=True))
         write_json(target / "inputs" / f"{cid}.json", {
             "system_sha256": info.get("system_sha256"),
+            "review_system_sha256": info.get("review_system_sha256"),
             "material": material,
             "tools": [],
         })
@@ -258,6 +260,7 @@ def run_live(args):
         "model": model,
         "provider_source": info.get("provider_source"),
         "generation_settings": {
+            "completion_passes": info.get("completion_passes"),
             "format": info.get("format"),
             "thinking_type": info.get("thinking_type"),
             "reasoning_effort": info.get("reasoning_effort"),
@@ -267,6 +270,7 @@ def run_live(args):
             "tools": 0,
         },
         "policy_sha256": info.get("system_sha256"),
+        "review_policy_sha256": info.get("review_system_sha256"),
         "corpus_sha256": corpus,
         "results": {},
         "failures": {},

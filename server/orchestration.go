@@ -467,8 +467,9 @@ func reporterToolDescriptionNeedsTemplateUpgrade(description string) bool {
 	return false
 }
 
-// finding_id remains the finding node ID used by native report callers; writes
-// are task-agnostic and retain the existing evidence-version transaction.
+// finding_id remains the finding node ID used by native report callers. Delivery
+// reports are reviewed with the finding's Reporter runtime before the existing
+// evidence-version transaction writes both reports.
 func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 	evidenceQuotes := agent.EvidenceQuotesSchema()
 	evidenceQuotes["description"] = "可选的逐字原文引用；traffic_id 必须是已绑定到该漏洞的真实流量 ID。只核对 proof/verification 的 HTTP 请求或响应正文，不代表漏洞已确认。"
@@ -520,6 +521,18 @@ func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 				if lookupErr != nil {
 					return actool.Errorf(lookupErr.Error()), nil
 				}
+				finding, lookupErr := s.m.pg.GetFinding(findingID)
+				if lookupErr != nil {
+					return actool.Errorf(lookupErr.Error()), nil
+				}
+				if finding == nil {
+					return actool.Errorf(fmt.Sprintf("未找到 finding_id=%d 对应的漏洞记录", nodeID)), nil
+				}
+				reviewed, reviewErr := s.reviewFindingDeliveryReport(ctx, finding, findingID, a.DeliveryReport, vector, *a.EvidenceVersion)
+				if reviewErr != nil {
+					return actool.Errorf("交付报告复核失败，未保存：" + reviewErr.Error()), nil
+				}
+				a.DeliveryReport = reviewed
 				deliveryReport, appendErr := s.appendDeliveryTrafficEvidence(ctx, findingID, *a.EvidenceVersion, a.DeliveryReport)
 				if appendErr != nil {
 					return actool.Errorf("附加完整 HTTP 流量证据失败：" + appendErr.Error()), nil
@@ -755,7 +768,10 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 		"3f39e940b17ac4ac44ce9149863c0714d9ea7c84c3f3fa7c0fd65034f07629de", // 上一版内置 Reporter 默认提示词
 		"dde76414b475c7d51011383357e2b4709bcfa1a1454fa39c926f0812becf2256", // 固定五节默认提示词
 		"fa49ee7b606d0bdc5d12c4432b522fb07e7a4d7599286bd2acdffe32ff462a73", // 上一版固定模板默认提示词
-		"3103d7d553a88859aa582e8c9841cfbcd151caa03684d0746b9b0e2a3c0ffd6d": // 上一版五节简版默认提示词
+		"3103d7d553a88859aa582e8c9841cfbcd151caa03684d0746b9b0e2a3c0ffd6d", // 上一版五节简版默认提示词
+		"c5fdbe6a4069cafda38f2c26b560c11faea0186f7554cfe472c26330950fc43f", // v10 固定报告默认提示词
+		"5d1f0391ca434e3d7f3649bea87f934c639ef8f80eb9b77d26858174519e5944", // v10 加入事实边界后的默认提示词
+		"8e639fbad0e554fe409bc34dc1c329992d7fb38e5f4fe8d61614a1e2c8f75138": // v11 精简事实边界提示词
 		return true
 	default:
 		return false
@@ -763,7 +779,7 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 }
 
 func (s *Server) upgradeReporterDeliveryTemplate() {
-	const flag = "reporter_prompt_delivery_template_v10"
+	const flag = "reporter_prompt_delivery_template_v12"
 	value, _, err := s.m.pg.GetSetting(flag)
 	if err != nil {
 		log.Printf("[reporter] 读取固定模板迁移标记失败: %v", err)
@@ -806,7 +822,7 @@ func (s *Server) upgradeReporterDeliveryTemplate() {
 			log.Printf("[reporter] 升级固定交付模板失败: %v", err)
 			return
 		}
-		log.Printf("[reporter] 默认 prompt 已升级为精简交付报告规范")
+		log.Printf("[reporter] 默认 prompt 已升级为重点事实边界和短报告规范")
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存固定模板 prompt 迁移标记失败: %v", err)

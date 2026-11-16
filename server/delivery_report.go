@@ -245,9 +245,11 @@ func deliveryReportCompletionSystem() string {
 
 逐句核对结论是否能在本次材料中找到依据。原始材料和执行记录优先于摘要、旧报告和 worker 总结。输入有 cvss_vector_hint 时原样使用；输入有 test_time_hint 且时间顺序影响结论时，换算后保留北京时间。账号、权限、会话和工具只采用材料明确记载的内容；没有记录就不猜。
 正文只保留开发理解问题、复现和修复所需的信息，避免在描述、测试过程和攻击链中重复同一事实。准确时间只在顺序、竞态或有效期影响结论时写入；详细参数、逐项时间、失败日志和哈希留在详细报告。失败尝试只写执行记录中确实发生的操作；输入中的 recorded_failures 用于核对实际失败。未验证边界简短说明，不补造步骤或结果。
-已观察结果与潜在影响分开写。未测试的请求方式、账号或条件不得写成已知行为。真假条件只导致响应不同，不等于已读出数据库内容；并发发送不证明服务端同刻处理，也不能据此推断串行提交结果。
-修复建议只给一项有证据支持的主要改动。重复写入优先建议服务端唯一约束或幂等处理；SQL 注入只建议参数化查询，不把过滤或拒绝特殊字符列为修复。没有源码证据时不猜文件或实现。只有状态码、响应头或身份标记时，不认定越权或数据泄露。
-HTTP 问题的“Burp 复现”说明实际使用状态；未使用时给简短的建议步骤并标记未验证。并发问题不能用 Repeater 串行重放证明。非 HTTP 问题说明 Burp 不适用。身份标记不是凭证，真实复测使用授权账号正常登录后的请求。
+已观察结果与潜在影响分开写。未测试的请求方式、账号或条件不得写成已知行为。SQL 注入测试若只比较恒真和恒假常量，只报告响应变化；未测试依赖字段值的条件时，不声称能读取字段值、探测数据或判断库结构。并发测试应写清客户端实际发送方式和结果；没有服务端时序证据时，不声称服务端同刻处理或串行提交也会产生相同结果。
+修复建议只给一项有证据支持的主要改动。材料只能支持待核实线索时，先写明需要补取的证据，不给条件式代码修复；确认缺陷后再给针对根因的改动。重复写入优先建议数据库唯一约束，并说明冲突时的预期响应；SQL 注入只建议参数化查询，不把过滤或拒绝特殊字符列为修复。没有源码证据时不猜文件或实现。只有状态码、响应头或身份标记时，不认定越权或数据泄露。
+资源授权关系使用清楚的业务称呼，例如“当前登录用户”“作业所有者”“文件所属账号”；不要用缩写代替对象关系。像 X-Eval-Actor 这样的合成标记不能证明真实登录身份，也不能作为切换账号的方法。事实材料给出账号角色时，只按材料来源陈述，不从报文标记推导认证状态。
+HTTP 问题的“Burp 复现”说明实际使用状态；未使用时给简短的建议步骤并标记未验证。证据没有真实认证材料时，不猜 Cookie、Token 或请求头，也不写修改凭证的 Repeater 步骤；建议分别用获授权账号正常登录、捕获各自请求，再核对结果。Repeater 逐条发送只能检查单次或串行行为；并发漏洞须使用并发工具或脚本验证，未实际使用时写明需要并发复测。非 HTTP 问题说明 Burp 不适用。
+各节只保留读者判断、复现和修复所需内容。一般用一段描述、一个修复动作和不超过四步的测试过程；非关键未验证项合并说明。攻击链的并列请求使用同一父节点和对齐分支。
 攻击链只连接证据支持的入口、必要条件、请求或命令与实际结果，使用简短中文树形内容。证据说明交代来源和完整性。平台会原样附加完整绑定报文，正文引用用途，不重抄；缺少响应正文或仅有片段时说明缺口。合成样本说明未测试真实目标。
 保存前由同一 Reporter 自查标题和 CVSS 不重复、五节顺序正确、每个 JSON 字段只含对应章节正文、事实和影响有依据、攻击链与附件相符。`
 }
@@ -348,6 +350,25 @@ func completeDeliveryReportWith(
 	complete func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error),
 ) (deliveryReportDraft, llm.Usage, error) {
 	ctx = agent.WithDeliveryReportReasoningDisabled(ctx)
+	draft, usage, err := completeDeliveryReportDraft(ctx, input, evidenceVersion, complete)
+	if err != nil {
+		return deliveryReportDraft{}, usage, err
+	}
+
+	reviewed, reviewUsage, err := reviewDeliveryReportDraft(ctx, input, draft, evidenceVersion, complete)
+	usage.Add(reviewUsage)
+	if err != nil {
+		return deliveryReportDraft{}, usage, err
+	}
+	return reviewed, usage, nil
+}
+
+func completeDeliveryReportDraft(
+	ctx context.Context,
+	input map[string]string,
+	evidenceVersion int64,
+	complete func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error),
+) (deliveryReportDraft, llm.Usage, error) {
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return deliveryReportDraft{}, llm.Usage{}, err
@@ -358,6 +379,116 @@ func completeDeliveryReportWith(
 	if err != nil {
 		return deliveryReportDraft{}, usage, err
 	}
+	draft, err := parseDeliveryReportDraft(message, stopReason, usage, input, evidenceVersion)
+	if err != nil {
+		return deliveryReportDraft{}, usage, err
+	}
+	return draft, usage, nil
+}
+
+func reviewDeliveryReportDraft(
+	ctx context.Context,
+	evidence map[string]string,
+	draft deliveryReportDraft,
+	evidenceVersion int64,
+	complete func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error),
+) (deliveryReportDraft, llm.Usage, error) {
+	input := map[string]any{
+		"evidence": evidence,
+		"draft": map[string]string{
+			"cvss_vector":    draft.CVSSVector,
+			"description":    draft.Description,
+			"remediation":    draft.Remediation,
+			"test_process":   draft.TestProcess,
+			"attack_chain":   draft.AttackChain,
+			"discovery_path": draft.DiscoveryPath,
+		},
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return deliveryReportDraft{}, llm.Usage{}, err
+	}
+	message, stopReason, usage, err := complete(ctx, llm.CompletionRequest{
+		System: []string{deliveryReportReviewSystem()}, Messages: []llm.Message{llm.UserText(string(raw))}, MaxTokens: deliveryReportMaxTokens, Thinking: "disabled",
+	})
+	if err != nil {
+		return deliveryReportDraft{}, usage, err
+	}
+	reviewed, err := parseDeliveryReportDraft(message, stopReason, usage, evidence, evidenceVersion)
+	if err != nil {
+		return deliveryReportDraft{}, usage, err
+	}
+	if reviewed.CVSSVector == "" {
+		reviewed.CVSSVector = draft.CVSSVector
+	}
+	return reviewed, usage, nil
+}
+
+func reviewDeliveryReportMarkdown(
+	ctx context.Context,
+	evidence map[string]string,
+	report string,
+	vector string,
+	complete func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error),
+) (string, error) {
+	input, err := json.Marshal(map[string]any{
+		"evidence":    evidence,
+		"draft":       stripDeliveryTrafficEvidence(report),
+		"cvss_vector": vector,
+	})
+	if err != nil {
+		return "", err
+	}
+	message, _, _, err := complete(agent.WithDeliveryReportReasoningDisabled(ctx), llm.CompletionRequest{
+		System: []string{deliveryReportMarkdownReviewSystem()}, Messages: []llm.Message{llm.UserText(string(input))}, MaxTokens: deliveryReportMaxTokens, Thinking: "disabled",
+	})
+	if err != nil {
+		return "", err
+	}
+	text := strings.TrimSpace(message.Text())
+	text = strings.TrimPrefix(text, "```json")
+	text = strings.TrimPrefix(text, "```")
+	text = strings.TrimSuffix(strings.TrimSpace(text), "```")
+	var output struct {
+		Report string `json:"report"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &output); err != nil {
+		return "", fmt.Errorf("报告复核未返回有效 JSON：%w", err)
+	}
+	reviewed := strings.TrimSpace(output.Report)
+	if reviewed == "" {
+		return "", errors.New("报告复核未返回正文")
+	}
+	if deliveryReportHeader(reviewed) != deliveryReportHeader(report) {
+		return "", errors.New("报告复核修改了标题或 CVSS 报告头")
+	}
+	if err := validateDeliveryReportTemplate(reviewed, vector); err != nil {
+		return "", fmt.Errorf("报告复核结果未通过固定模板校验：%w", err)
+	}
+	return reviewed, nil
+}
+
+func deliveryReportHeader(report string) string {
+	end := len(report)
+	walkDeliveryMarkdown(report, func(line string, offset int) {
+		if end != len(report) {
+			return
+		}
+		level, _ := deliveryMarkdownHeading(line)
+		if level == 2 {
+			end = offset
+		}
+	})
+	return strings.TrimSpace(report[:end])
+}
+
+func parseDeliveryReportDraft(
+	message llm.Message,
+	stopReason string,
+	usage llm.Usage,
+	input map[string]string,
+	evidenceVersion int64,
+) (deliveryReportDraft, error) {
 	text := strings.TrimSpace(message.Text())
 	text = strings.TrimPrefix(text, "```json")
 	text = strings.TrimPrefix(text, "```")
@@ -368,7 +499,7 @@ func completeDeliveryReportWith(
 	}
 	var draft deliveryReportDraft
 	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &draft); err != nil {
-		return deliveryReportDraft{}, usage, &deliveryReportOutputError{
+		return deliveryReportDraft{}, &deliveryReportOutputError{
 			cause: errDeliveryReportInvalidJSON, raw: text, stopReason: stopReason,
 			contentBlockType: contentBlockTypes, outputTokens: usage.OutputTokens,
 		}
@@ -387,13 +518,117 @@ func completeDeliveryReportWith(
 	draft.DiscoveryPath = stripDeliveryDraftSectionHeading(draft.DiscoveryPath, "证据说明")
 	if draft.Description == "" || draft.Remediation == "" || draft.TestProcess == "" ||
 		draft.AttackChain == "" || draft.DiscoveryPath == "" {
-		return deliveryReportDraft{}, usage, &deliveryReportOutputError{
+		return deliveryReportDraft{}, &deliveryReportOutputError{
 			cause: errDeliveryReportMissingBody, raw: text, stopReason: stopReason,
 			contentBlockType: contentBlockTypes, outputTokens: usage.OutputTokens,
 		}
 	}
 	draft.EvidenceVersion = evidenceVersion
-	return draft, usage, nil
+	return draft, nil
+}
+
+func deliveryReportReviewSystem() string {
+	return `你是渗透测试交付报告的证据审阅人。你会收到原始测试材料和一份待审报告。逐句核对材料，直接改正报告后返回完整 JSON。此步骤只复核并修正交付报告，不重新测试目标，不增加漏洞结论。
+
+只返回六个字符串字段组成的 JSON 对象，字段名为 cvss_vector、description、remediation、test_process、attack_chain、discovery_path。字段内容遵守固定五节结构，子标题与生成规范一致。不要输出解释、评分表、Markdown 代码围栏或原始报文。
+
+审阅重点：
+- 删除无法由材料支持的账号身份、认证形式、接口行为、根因、影响和失败操作。合成标记不是登录凭证，正文不要抄出标记；材料没有真实认证凭证时，不猜 Cookie、Token 或请求头，也不建议修改它们。
+- 只有状态码或响应头且正文、身份或基线缺失时，结论保持待核实；修复建议只说明要补取什么证据，不写条件式代码修复。
+- SQL 测试只比较恒真和恒假常量时，只写观察到的响应差异；未测试字段条件时，不写数据读取、数据提取或数据库结构探测。
+- 修复建议只保留一项证据支持的改动，不给备选方案，不猜源码路径或实现。报告使用常见中文短句，删除重复内容和内部术语。
+- 测试过程最多四个主要步骤。Burp 建议只使用材料中的真实请求和已知账号条件。并发复现不能写 Repeater 的并发功能或虚构插件设置。
+- 攻击链只保留证据支持的步骤。树形分支对齐，不混用竖线字符和空格缩进。CVSS 向量保持原报告数值，不擅自重新定级。
+
+报告通过检查时也要原样返回全部字段；发现问题时只修正文，不删除有证据支持的事实，不改写平台稍后附加的原始证据。`
+}
+
+func deliveryReportMarkdownReviewSystem() string {
+	return `你是渗透测试交付报告的证据审阅人。输入包含原始测试材料、待审报告和已确定的 CVSS 4.0 向量。逐句核对报告，直接改正不准确、超出证据或难以理解的内容。不要重新测试目标，也不要增加漏洞结论。
+
+只返回 JSON 对象 {"report":"完整 Markdown 报告"}。保留原报告的标题、CVSS 向量和固定章节顺序：描述、修复建议、测试过程、攻击链路、证据说明。保留必需的三级标题。CVSS 向量必须与输入完全一致。报告中不要附加流量原文；平台会在保存后附加。
+
+审阅规则：
+- 原始请求、响应和执行记录优先于摘要。区分合成身份标记与真实认证；未验证账号身份、缺少响应正文或本人基线时，不写成已确认越权或数据泄露，也不猜测凭证或请求头。
+- 只测恒真、恒假常量时，只陈述响应差异，不声称读取字段值、提取数据或判断数据库结构。并发请求没有服务端时序证据时，不声称服务端同刻执行或串行也可复现。
+- 实际使用 Burp 的情况必须与材料一致。未使用时标为未验证，并给出基于真实授权账号请求的简短复测建议；并发漏洞不得建议用 Repeater 串行发送复现。非 HTTP 问题说明 Burp 不适用。
+- 失败记录只写实际执行过的失败操作。修复建议只给有证据支持的一项改动；待核实线索只写需要补取的证据，不给条件式代码修复；没有源码证据时不猜路径、版本或实现。
+- 用简短、自然的中文写给开发人员。删除重复解释、内部评测术语和无法复核的影响。攻击链只连接已知前提、实际操作和观察结果，并保持并列分支对齐。
+
+若报告符合规则，仍返回完整报告。不要输出说明、审阅意见或代码围栏。`
+}
+
+func (s *Server) reviewFindingDeliveryReport(
+	ctx context.Context,
+	finding *db.DBFinding,
+	findingID int64,
+	report string,
+	vector string,
+	evidenceVersion int64,
+) (string, error) {
+	traffic, err := s.m.pg.GetFindingTraffic(ctx, findingID)
+	if err != nil {
+		return "", fmt.Errorf("读取报告复核证据失败：%w", err)
+	}
+	if traffic == nil || traffic.Version != evidenceVersion {
+		return "", db.ErrEvidenceConflict
+	}
+	requestPacket, responsePacket, err := s.deliveryTrafficPackets(traffic.Bindings)
+	if err != nil {
+		return "", fmt.Errorf("读取报告复核流量失败：%w", err)
+	}
+	taskGoal := ""
+	taskID := int64(0)
+	if finding.TaskID != nil {
+		taskID = *finding.TaskID
+		task, err := s.m.pg.GetTask(taskID)
+		if err != nil {
+			return "", fmt.Errorf("读取报告任务背景失败：%w", err)
+		}
+		if task != nil {
+			taskGoal = task.Goal
+		}
+	}
+	if taskID <= 0 {
+		taskID = agent.RunInfoFrom(ctx).TaskID
+	}
+	evidenceQuotes, err := json.Marshal(finding.EvidenceQuotes)
+	if err != nil {
+		return "", fmt.Errorf("编码报告引用证据失败：%w", err)
+	}
+	evidence := map[string]string{
+		"task_description":         finding.TaskDescription,
+		"task_goal":                taskGoal,
+		"finding_name":             finding.Name,
+		"vulnerability_class":      finding.VulnClass,
+		"severity":                 finding.Severity,
+		"summary":                  finding.Summary,
+		"evidence":                 finding.Evidence,
+		"evidence_quotes":          string(evidenceQuotes),
+		"counterevidence":          finding.Counterevidence,
+		"existing_detailed_report": finding.Report,
+		"request_packet":           requestPacket,
+		"response_packet":          responsePacket,
+		"cvss_vector_hint":         vector,
+		"evidence_transport":       "unknown",
+	}
+	if len(traffic.Bindings) > 0 {
+		evidence["evidence_transport"] = "http"
+	}
+	var complete func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error)
+	if taskID > 0 {
+		runtime := &taskLLMRuntime{s: s, taskID: strconv.FormatInt(taskID, 10), agentKey: "reporter"}
+		complete = runtime.Complete
+	} else if provider, _, ok := s.agentBindingProvider("reporter"); ok {
+		complete = provider.Complete
+	} else if provider, _, ok := s.globalProvider(); ok {
+		complete = provider.Complete
+	} else {
+		return "", errors.New("没有可用的 Reporter 模型，交付报告未保存")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+	defer cancel()
+	return reviewDeliveryReportMarkdown(ctx, evidence, report, vector, complete)
 }
 
 func (s *Server) deliveryTrafficPackets(bindings []db.FindingTrafficBinding) (string, string, error) {

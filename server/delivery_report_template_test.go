@@ -104,7 +104,21 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptNeedsTemplateUpgrade(string(previousV9)) {
 		t.Fatal("previous v9 stock default would not receive the simplified writing rules")
 	}
-	for _, customized := range []string{string(previous) + "\n用户自定义要求。", string(latestPrevious) + "\n用户自定义要求。", string(previousV9) + "\n用户自定义要求。", "自定义报告模板", agent.ReporterDefaultPrompt} {
+	previousV10, err := os.ReadFile("testdata/reporter-default-v10.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reporterPromptNeedsTemplateUpgrade(string(previousV10)) {
+		t.Fatal("previous v10 stock default would not receive the stricter evidence boundaries")
+	}
+	previousV11, err := os.ReadFile("testdata/reporter-default-v11.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reporterPromptNeedsTemplateUpgrade(string(previousV11)) {
+		t.Fatal("previous v11 stock default would not receive concise hard-case examples")
+	}
+	for _, customized := range []string{string(previous) + "\n用户自定义要求。", string(latestPrevious) + "\n用户自定义要求。", string(previousV9) + "\n用户自定义要求。", string(previousV10) + "\n用户自定义要求。", string(previousV11) + "\n用户自定义要求。", "自定义报告模板", agent.ReporterDefaultPrompt} {
 		if reporterPromptNeedsTemplateUpgrade(customized) {
 			t.Fatal("custom or already current prompt would be replaced")
 		}
