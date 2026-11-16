@@ -187,7 +187,13 @@ func (s *Server) generateFindingDeliveryReport(w http.ResponseWriter, r *http.Re
 		return
 	}
 	draft, err := s.completeDeliveryReport(r.Context(), access,
-		requestPacket, responsePacket, traffic.Version, len(traffic.Bindings) > 0)
+		requestPacket,
+		responsePacket,
+		traffic.Version,
+		len(traffic.Bindings) > 0,
+		deliveryEvidenceTimeIndex(traffic.Bindings),
+		deliveryEvidenceTestTimeHint(traffic.Bindings),
+	)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "生成交付报告草稿失败："+err.Error())
 		return
@@ -212,7 +218,7 @@ func (s *Server) generateFindingDeliveryReport(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, draft)
 }
 
-func (s *Server) completeDeliveryReport(ctx context.Context, access deliveryReportAccess, requestPacket, responsePacket string, evidenceVersion int64, hasHTTPBindings bool) (deliveryReportDraft, error) {
+func (s *Server) completeDeliveryReport(ctx context.Context, access deliveryReportAccess, requestPacket, responsePacket string, evidenceVersion int64, hasHTTPBindings bool, evidenceTimeIndex, testTimeHint string) (deliveryReportDraft, error) {
 	evidenceTransport := "unknown"
 	if hasHTTPBindings {
 		evidenceTransport = "http"
@@ -228,16 +234,80 @@ func (s *Server) completeDeliveryReport(ctx context.Context, access deliveryRepo
 		"existing_detailed_report":          access.finding.Report,
 		"existing_detailed_report_is_stale": strconv.FormatBool(access.finding.Report != "" && access.finding.ReportEvidenceVersion != access.finding.EvidenceVersion),
 		"request_packet":                    requestPacket,
+		"request_line_index":                deliveryReportRequestLineIndex(requestPacket),
 		"response_packet":                   responsePacket,
 		"evidence_transport":                evidenceTransport,
+		"evidence_time_index":               evidenceTimeIndex,
+		"test_time_hint":                    testTimeHint,
 	}
 	runtime := &taskLLMRuntime{s: s, taskID: access.task.ID, agentKey: "reporter"}
 	draft, _, err := completeDeliveryReportWith(ctx, input, evidenceVersion, runtime.Complete)
 	return draft, err
 }
 
+func deliveryEvidenceTimeIndex(bindings []db.FindingTrafficBinding) string {
+	if len(bindings) == 0 {
+		return "没有绑定流量采集时间。"
+	}
+	location := beijingLocation()
+	lines := make([]string, 0, len(bindings))
+	for index, binding := range bindings {
+		capturedAt := "未记录"
+		if binding.Snapshot.CapturedAt > 0 {
+			capturedAt = time.Unix(binding.Snapshot.CapturedAt, 0).In(location).Format("2006-01-02 15:04:05") + "（北京时间）"
+		}
+		purpose := strings.TrimSpace(binding.Note)
+		if purpose == "" {
+			purpose = deliveryBindingRoleLabel(binding.Role)
+		}
+		lines = append(lines, fmt.Sprintf("%d. %s：%s", index+1, purpose, capturedAt))
+	}
+	return "以下为绑定请求各自的采集时间（北京时间），只用于对应请求，不代表漏洞首次发现时间或完整测试时段：\n" + strings.Join(lines, "\n")
+}
+
+func deliveryEvidenceTestTimeHint(bindings []db.FindingTrafficBinding) string {
+	var firstCapturedAt int64
+	for _, binding := range bindings {
+		capturedAt := binding.Snapshot.CapturedAt
+		if capturedAt > 0 && (firstCapturedAt == 0 || capturedAt < firstCapturedAt) {
+			firstCapturedAt = capturedAt
+		}
+	}
+	if firstCapturedAt == 0 {
+		return "测试时间未记录"
+	}
+	return time.Unix(firstCapturedAt, 0).In(beijingLocation()).Format("2006-01-02 15:04:05（北京时间，首条证据请求采集时间）")
+}
+
+func beijingLocation() *time.Location {
+	return time.FixedZone("北京时间", 8*60*60)
+}
+
+func reportEvalTestTimeHint(raw string) string {
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(raw))
+	if err != nil {
+		return "测试时间未记录"
+	}
+	return parsed.In(beijingLocation()).Format("2006-01-02 15:04:05（北京时间）")
+}
+
 func deliveryReportCompletionSystem() string {
 	return agent.DeliveryReportDraftRules
+}
+
+func deliveryReportRequestLineIndex(packet string) string {
+	lines := make([]string, 0)
+	for _, line := range strings.Split(packet, "\n") {
+		fields := strings.Fields(strings.TrimSuffix(line, "\r"))
+		if len(fields) < 3 || !strings.HasPrefix(fields[2], "HTTP/") || !strings.HasPrefix(fields[1], "/") {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%d. %s %s", len(lines)+1, fields[0], fields[1]))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
 }
 
 func stripDeliveryDraftSectionHeading(content, section string) string {
@@ -255,24 +325,6 @@ func stripDeliveryDraftSectionHeading(content, section string) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
-func normalizeDeliveryReportTerminology(content string) string {
-	content = strings.ReplaceAll(content, "文件属主", "文件所有者")
-	return strings.ReplaceAll(content, "属主", "所有者")
-}
-
-func normalizeDeliveryReportRemediation(input map[string]string, remediation string) string {
-	name := strings.ToLower(input["finding_name"])
-	class := strings.ToLower(input["vulnerability_class"])
-	if strings.Contains(name, "盲注") || strings.Contains(name, "sql注入") || strings.Contains(name, "sql injection") ||
-		strings.Contains(name, "sqli") || strings.Contains(class, "sql injection") || strings.Contains(class, "sqli") {
-		return "对相关查询参数使用参数化查询，避免将用户输入拼接进 SQL 语句。"
-	}
-	if strings.Contains(name, "会话") && (strings.Contains(name, "退出") || strings.Contains(name, "登出") || strings.Contains(name, "注销")) {
-		return "服务端处理登出请求后应立即使当前会话失效，并拒绝后续使用该会话的请求。"
-	}
-	return remediation
-}
-
 func hasExplicitDeliveryConcurrencyEvidence(input map[string]string) bool {
 	source := strings.ToLower(input["summary"] + "\n" + input["evidence"])
 	for _, negative := range []string{"未测试并发", "未验证并发", "未执行并发", "并发未测试", "并发未验证", "没有进行并发测试", "没有并发测试"} {
@@ -286,34 +338,6 @@ func hasExplicitDeliveryConcurrencyEvidence(input map[string]string) bool {
 		}
 	}
 	return false
-}
-
-func normalizeUnsupportedDeliveryConcurrency(content string, input map[string]string) string {
-	if hasExplicitDeliveryConcurrencyEvidence(input) {
-		return content
-	}
-	for _, phrase := range []string{"并发父节点", "并发提交", "并发请求", "并发操作", "并发发送"} {
-		content = strings.ReplaceAll(content, phrase, "请求关系未验证")
-	}
-	return content
-}
-
-func normalizeSyntheticDeliveryReportBurp(input map[string]string, content string) string {
-	if input["synthetic"] != "true" || input["evidence_transport"] != "http" {
-		return content
-	}
-	const heading = "### Burp 复现"
-	start := strings.Index(content, heading)
-	if start < 0 {
-		return content
-	}
-	bodyStart := start + len(heading)
-	end := len(content)
-	if next := strings.Index(content[bodyStart:], "\n### "); next >= 0 {
-		end = bodyStart + next
-	}
-	replacement := heading + "\n本次未在 Burp Repeater 发送。合成材料不能直接重放；真实复测需登录授权目标，在 Burp 捕获并重放请求，核对响应和前后结果。"
-	return content[:start] + replacement + content[end:]
 }
 
 func normalizeDeliveryDraftSubheadings(content string, headings ...string) string {
@@ -460,7 +484,26 @@ func ensureDeliveryAttackChainTextFenceWithEvidence(content, requestPacket strin
 	content = strings.Join(normalizeDeliveryAttackTreeBranches(strings.Split(content, "\n")), "\n")
 	content = strings.Join(normalizeFlatDeliveryAttackChain(strings.Split(content, "\n"), requestPacket, allowConcurrentNormalization), "\n")
 	content = strings.Join(normalizeDeliveryAttackTreeBranches(strings.Split(content, "\n")), "\n")
+	content = ensureDeliveryAttackChainRoot(content)
 	return "```text\n" + content + "\n```"
+}
+
+func ensureDeliveryAttackChainRoot(content string) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 {
+		return content
+	}
+	first := strings.TrimSpace(lines[0])
+	if strings.EqualFold(first, "root") && len(lines) > 1 {
+		return ensureDeliveryAttackChainRoot(strings.Join(lines[1:], "\n"))
+	}
+	for _, marker := range []string{"├─", "└─"} {
+		if strings.HasPrefix(first, marker) {
+			lines[0] = strings.TrimSpace(strings.TrimPrefix(first, marker))
+			return strings.Join(lines, "\n")
+		}
+	}
+	return content
 }
 
 func normalizeExplicitDownArrowChain(content string) (string, bool) {
@@ -874,15 +917,7 @@ func parseDeliveryReportDraft(
 		input["request_packet"],
 		hasExplicitDeliveryConcurrencyEvidence(input),
 	)
-	draft.AttackChain = normalizeUnsupportedDeliveryConcurrency(draft.AttackChain, input)
 	draft.DiscoveryPath = stripDeliveryDraftSectionHeading(draft.DiscoveryPath, "证据说明")
-	draft.Remediation = normalizeDeliveryReportRemediation(input, draft.Remediation)
-	draft.Description = normalizeDeliveryReportTerminology(draft.Description)
-	draft.Remediation = normalizeDeliveryReportTerminology(draft.Remediation)
-	draft.TestProcess = normalizeDeliveryReportTerminology(draft.TestProcess)
-	draft.TestProcess = normalizeSyntheticDeliveryReportBurp(input, draft.TestProcess)
-	draft.AttackChain = normalizeDeliveryReportTerminology(draft.AttackChain)
-	draft.DiscoveryPath = normalizeDeliveryReportTerminology(draft.DiscoveryPath)
 	if draft.Description == "" || draft.Remediation == "" || draft.TestProcess == "" ||
 		draft.AttackChain == "" || draft.DiscoveryPath == "" {
 		return deliveryReportDraft{}, &deliveryReportOutputError{

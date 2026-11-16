@@ -2,6 +2,7 @@
 """准备、执行及整理固定报告样本评测。"""
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import getpass
 import hashlib
 import json
@@ -28,7 +29,9 @@ SUBHEADINGS = [
 DIMENSIONS = ["事实准确", "容易理解", "可以复现", "影响边界", "修复具体"]
 INSTRUCTION = (
     "只根据附带的离线合成材料写一份交付报告；不调用工具、不执行命令、不访问网络。"
-    "遵循系统提示中的固定结构、事实来源、影响边界和攻击链顺序。先核对证据与缺口，再写短句正文。"
+    "遵循系统提示中的固定结构和事实边界，只写材料明确支持的事实，不补造测试动作、身份、影响或实现根因。"
+    "测试过程首行必须按 test_time_hint 写测试时间；缺失时写未记录。定级依据一两句，不逐项解释 CVSS 向量；修复只给一项有依据的措施，不列备选方案。"
+    "每节用短句，正文目标不超过 800 字；不要扩写未测项目或复述证据，不删复现必需信息。合成样本不能当作真实测试，禁止建议替换样本身份、Host 或认证字段。"
     "不要重复请求、响应或终端原文；评测器会在正文后附加完整材料。"
 )
 
@@ -331,7 +334,7 @@ def expand_go_policy(source):
         "DeliveryReportWritingRules",
         "DeliveryReportDraftRules",
         "DeliveryReportRuntimeGuidance",
-        "DeliveryReportHardCaseGuidance",
+        "DeliveryReportEvidenceGuidance",
         "DeliveryReportStyleGuidance",
     }
 
@@ -497,6 +500,21 @@ def metrics(case, report):
         length_lines = length_lines[1:]
     length_lines = [line for line in length_lines if not line.startswith("CVSS 4.0：")]
     narrative_characters = len("\n".join(length_lines).strip())
+    test_process_match = re.search(
+        r"(?ms)^## 测试过程\s*\n(.*?)(?=^## |\Z)", report_body
+    )
+    test_time_line = None
+    if test_process_match:
+        test_time_match = re.search(r"(?m)^测试时间：(.+?)\s*$", test_process_match.group(1))
+        if test_time_match:
+            test_time_line = test_time_match.group(1)
+    expected_test_time = "未记录"
+    if case.get("test_time"):
+        parsed_test_time = datetime.fromisoformat(case["test_time"])
+        if parsed_test_time.tzinfo is None:
+            parsed_test_time = parsed_test_time.replace(tzinfo=timezone.utc)
+        beijing = timezone(timedelta(hours=8), "北京时间")
+        expected_test_time = parsed_test_time.astimezone(beijing).strftime("%Y-%m-%d %H:%M:%S（北京时间）")
     heading_rows = re.findall(r"^ {0,3}(#{1,6})\s+(.+?)\s*$", narrative, re.M)
     headings = [text for marks, text in heading_rows if len(marks) == 2]
     subheadings = []
@@ -513,9 +531,21 @@ def metrics(case, report):
     )
     chain_text = chain_match.group(1) if chain_match else ""
     chain_requests = []
+    chain_roots = 0
+    chain_disconnected_nodes = []
     for block in re.findall(r"```[^\n]*\n(.*?)```", chain_text, re.S):
         for line in block.splitlines():
-            node = re.sub(r"^[\s│├└─>→↓]+", "", line)
+            stripped = line.strip()
+            if not stripped:
+                continue
+            is_branch = bool(re.match(r"^[│\s]*[├└]─", line))
+            if is_branch:
+                node = re.sub(r"^[\s│├└─>→↓]+", "", line)
+            else:
+                node = stripped
+                chain_roots += 1
+                if chain_roots > 1:
+                    chain_disconnected_nodes.append(stripped)
             request = re.match(
                 r"(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)", node
             )
@@ -549,6 +579,12 @@ def metrics(case, report):
         "total_characters": len(report),
         "narrative_characters": narrative_characters,
         "narrative_within_800_characters": narrative_characters <= 800,
+        "test_time_heading_present": test_time_line is not None,
+        "test_time_matches_input": (
+            expected_test_time in test_time_line
+            if test_time_line and case.get("test_time")
+            else test_time_line == "未记录"
+        ),
         "headings": headings,
         "required_headings_ok": headings == HEADINGS,
         "subheadings": subheadings,
@@ -565,6 +601,9 @@ def metrics(case, report):
         "verbatim_material_found": preserved,
         "verbatim_material_not_found": missing,
         "attack_chain_request_nodes": chain_requests,
+        "attack_chain_root_count": chain_roots,
+        "attack_chain_single_root": chain_roots == 1,
+        "attack_chain_disconnected_nodes": chain_disconnected_nodes,
         "attack_chain_request_paths_match_evidence": (
             not missing_chain_requests if case["kind"] == "http" else None
         ),

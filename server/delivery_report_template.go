@@ -197,7 +197,9 @@ func deliveryAttackChainHasTree(report string) bool {
 	var fence byte
 	fenceLength := 0
 	textFence := false
+	textFenceCount := 0
 	treeRoot := false
+	treeRootCount := 0
 	treeBranch := false
 	inComment := false
 	for offset := 0; offset < len(body); {
@@ -218,20 +220,21 @@ func deliveryAttackChainHasTree(report string) bool {
 				run++
 			}
 			if !deliveryIndentedCode(line) && run >= fenceLength && strings.TrimSpace(trimmed[run:]) == "" {
-				if textFence && treeRoot && treeBranch {
-					return true
-				}
 				fence, fenceLength, textFence = 0, 0, false
 				continue
 			}
 			if textFence {
 				node := strings.TrimLeft(trimmed, "│ \t")
+				if strings.HasPrefix(node, "#") {
+					continue
+				}
 				branch := strings.HasPrefix(node, "├─") || strings.HasPrefix(node, "└─")
 				if branch && treeRoot && strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(node, "├─"), "└─")) != "" {
 					treeBranch = true
 				}
 				if node != "" && !branch {
 					treeRoot = true
+					treeRootCount++
 				}
 			}
 			continue
@@ -251,9 +254,11 @@ func deliveryAttackChainHasTree(report string) bool {
 		fence, fenceLength = marker, length
 		info := strings.Fields(strings.TrimSpace(trimmed[length:]))
 		textFence = len(info) > 0 && info[0] == "text"
-		treeRoot, treeBranch = false, false
+		if textFence {
+			textFenceCount++
+		}
 	}
-	return false
+	return textFenceCount == 1 && treeRoot && treeRootCount == 1 && treeBranch
 }
 
 func validateDeliveryReportTemplate(report, expectedVector string) error {

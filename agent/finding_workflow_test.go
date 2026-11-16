@@ -143,44 +143,40 @@ func TestReporterDefaultPromptUsesMarkdownRulesWithoutJSONContract(t *testing.T)
 
 func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 	for _, required := range []string{
-		"原始请求/响应和命令输出优先于 worker 总结、漏洞摘要和旧报告",
-		"来源冲突或缺项时写明未核实",
-		"详细报告保留工具参数、准确时间、失败日志、哈希和证据索引",
-		"交付报告只留理解、复现和修复所需内容",
-		"时间使用北京时间",
-		"HTTP 状态码或响应头不能证明正文已返回",
-		"CVSS 向量不是影响证据",
-		"评分前提需复核",
-		"只有缺陷行为已由材料确认时，才给对应的代码或配置修复",
-		"结果放在触发它的操作下面",
-		"顺序操作逐级相连，并发操作才并列",
-		"页面入口有记录才写页面",
-		"失败尝试只写实际执行过的操作",
+		"仅适用于交付报告字段",
+		"不改变详细报告的章节和台账",
+		"只写材料支持的身份、权限、操作、次数和结果",
+		"状态码或响应头不能证明响应正文已返回",
+		"不要把占位主机、身份、Cookie 或 Token 改成真实测试条件",
+		"首条证据请求采集时间",
+		"没有可靠记录时写“测试时间：未记录”",
+		"修复建议只写一项与已确认行为相符的主要措施",
+		"不得让人替换 Host、认证头或样本占位值",
+		"失败尝试只写实际做过且失败的操作",
 		"Repeater 串行重放不能证明并发",
-		"HTTP 报告必须有 Burp Repeater 小节",
-		"说明重放什么、观察什么，不重抄报文",
-		"回读请求与并发组并列，放在所有并发请求之后",
-		"没有找到恢复操作，不等于无法恢复",
-		"交付正文以 500 字符为目标，最多 800 字符",
-		"五节分配上限（含节标题、子标题和链路）",
-		"X-Eval-Actor 等合成标记不是认证字段",
-		"禁用“判决项”“阴性结果”“如实交付”“零错配”",
-		"平台附加的完整报文不重抄",
-		"终端 id 命令只说明当前进程用户",
-		"保存前由同一 Reporter 检查复现条件、观察结果、影响边界、修复依据和链路顺序",
+		"攻击链只画一棵树。根节点写材料中实际的页面或功能入口",
+		"HTTP 请求的 METHOD/path 必须逐字复制 request_line_index",
+		"前后查询按时间顺序展示",
+		"多条请求不等于并发",
+		"正文以 800 字以内为目标，不硬截断",
+		"发现过程写测试时间和最多四步",
+		"失败与未验证项最多两条",
+		"正文写给开发看",
+		"不要把交付报告的精简要求套到详细报告",
+		"保存前在本次输出中核对结论、限制、修复和链路",
 	} {
 		if !strings.Contains(DeliveryReportWritingRules, required) {
 			t.Fatalf("delivery report guidance is missing %q", required)
 		}
 	}
-	for _, forced := range []string{"测试过程必须各有一行“测试时间：”和“执行工具：”", "测试时间：未记录", "执行工具：未记录"} {
-		if strings.Contains(DeliveryReportWritingRules, forced) {
-			t.Fatalf("delivery report guidance still forces execution ledger fields: %q", forced)
+	for _, absent := range []string{"正文以 500 字符为目标、最多 800 字符", "禁用“判决项”", "执行工具：未记录"} {
+		if strings.Contains(DeliveryReportWritingRules, absent) {
+			t.Fatalf("delivery report guidance retains a style blacklist or hard limit: %q", absent)
 		}
 	}
-	if strings.Contains(DeliveryReportWritingRules, "JSON 的 description 字段") || !strings.Contains(DeliveryReportDraftRules, "description 先写问题") ||
+	if strings.Contains(DeliveryReportWritingRules, "JSON 的 description 字段") || !strings.Contains(DeliveryReportDraftRules, "description 先用两三句写问题") ||
 		!strings.Contains(DeliveryReportDraftRules, "cvss_vector 优先使用输入提供的有效向量") ||
-		!strings.Contains(DeliveryReportDraftRules, "顺序操作逐级相连") {
+		!strings.Contains(DeliveryReportDraftRules, "attack_chain 只写一棵短树。根节点使用实际页面或功能入口") {
 		t.Fatal("JSON draft format rules must stay separate from the full Markdown Reporter rules")
 	}
 }

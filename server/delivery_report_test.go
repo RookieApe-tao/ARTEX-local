@@ -50,6 +50,24 @@ func TestDeliveryReportWithoutBoundTrafficDoesNotInventPackets(t *testing.T) {
 	}
 }
 
+func TestDeliveryReportRequestLineIndexPreservesEncodedPathsAndCounts(t *testing.T) {
+	packet := "" +
+		"证据绑定 1\n" +
+		"GET /api/items?id=a%2Fb HTTP/1.1\r\nHost: example.test\r\n\r\n\n" +
+		"证据绑定 2\n" +
+		"POST /api/items HTTP/1.1\r\nHost: example.test\r\n\r\n{}\n" +
+		"证据绑定 3\n" +
+		"GET /api/items?id=a%2Fb HTTP/1.1\r\nHost: example.test\r\n\r\n"
+
+	want := "1. GET /api/items?id=a%2Fb\n2. POST /api/items\n3. GET /api/items?id=a%2Fb"
+	if got := deliveryReportRequestLineIndex(packet); got != want {
+		t.Fatalf("request line index = %q, want %q", got, want)
+	}
+	if got := deliveryReportRequestLineIndex("没有留存 HTTP 请求行"); got != "" {
+		t.Fatalf("request line index without HTTP evidence = %q, want empty", got)
+	}
+}
+
 func TestDeliveryReportUsesAllBoundPacketsWithoutRedactingCredentials(t *testing.T) {
 	dataDir := t.TempDir()
 	managerDir := filepath.Join(dataDir, "manager")

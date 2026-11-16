@@ -160,6 +160,7 @@ func reportEvalPromptInput(sample reporteval.Case, material []byte) (map[string]
 			failures = append(failures, failure)
 		}
 	}
+	requestPacket := reportEvalPackets(sample.Evidence, true)
 	return map[string]string{
 		"task_description":                  "离线合成交付报告评测；不对应真实系统或真实测试。",
 		"task_goal":                         "仅根据固定样本写报告，不执行命令、不调用工具、不访问网络。",
@@ -171,7 +172,7 @@ func reportEvalPromptInput(sample reporteval.Case, material []byte) (map[string]
 		"known_limitations":                 strings.Join(sample.Facts.Limitations, "\n"),
 		"test_tool_hint":                    sample.Facts.TestTool,
 		"cvss_vector_hint":                  sample.Facts.CVSSVector,
-		"test_time_hint":                    sample.TestTime,
+		"test_time_hint":                    reportEvalTestTimeHint(sample.TestTime),
 		"finding_name":                      sample.Name,
 		"vulnerability_class":               "",
 		"severity":                          "",
@@ -179,7 +180,8 @@ func reportEvalPromptInput(sample reporteval.Case, material []byte) (map[string]
 		"evidence":                          string(encodedFacts),
 		"existing_detailed_report":          "",
 		"existing_detailed_report_is_stale": "false",
-		"request_packet":                    reportEvalPackets(sample.Evidence, true),
+		"request_packet":                    requestPacket,
+		"request_line_index":                deliveryReportRequestLineIndex(requestPacket),
 		"response_packet":                   reportEvalPackets(sample.Evidence, false),
 	}, nil
 }

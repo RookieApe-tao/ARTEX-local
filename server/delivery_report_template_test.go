@@ -26,6 +26,8 @@ func TestValidateDeliveryReportTemplate(t *testing.T) {
 		{"duplicate finding name", strings.Replace(valid, "CVSS 4.0：", "漏洞名称：测试系统-模块 /test 测试缺陷\nCVSS 4.0：", 1), false},
 		{"invalid header vector", strings.Replace(valid, vector, "CVSS:4.0/AV:N", 1), false},
 		{"attack chain without tree", strings.Replace(valid, "└─ 请求结果和业务影响未验证", "请求结果和业务影响未验证", 1), false},
+		{"attack chain has multiple roots", strings.Replace(valid, "└─ 请求结果和业务影响未验证", "另一个请求根节点\n└─ 请求结果和业务影响未验证", 1), false},
+		{"attack chain splits into multiple trees", strings.Replace(valid, "## 证据说明", "```text\n第二个根节点\n└─ 第二个结果\n```\n\n## 证据说明", 1), false},
 		{"packet cannot supply attack chain", strings.Replace(valid, "## 攻击链路", "```http\n## 攻击链路\n```", 1), false},
 		{"comment cannot supply attack chain", strings.Replace(valid, "## 攻击链路", "<!--\n## 攻击链路\n-->", 1), false},
 		{"wrong section order", strings.Replace(valid, "## 修复建议", "## 测试过程", 1), false},
@@ -87,6 +89,13 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	}
 	if !reporterPromptHashNeedsTemplateUpgrade("17aa6f65e6d88922dc086b17730357c00b3ef9d55535a85d513eb3cc795ede4e") {
 		t.Fatal("previous v18 default prompt would not receive the updated length and endpoint rules")
+	}
+	const previousV19Hash = "2e629b3e35fcab552a9a901419af419dfb721ebf15a654e9f8443f1c44d2d3ee"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV19Hash) {
+		t.Fatal("previous v19 stock prompt would keep duplicating the shared chain rules")
+	}
+	if reporterPromptNeedsTemplateUpgrade("previous v19 stock prompt\n用户自定义要求。") {
+		t.Fatal("an edited v19 prompt must not be migrated over")
 	}
 	previous, err := os.ReadFile("testdata/reporter-default-v3.txt")
 	if err != nil {

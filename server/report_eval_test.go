@@ -10,11 +10,44 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Autumn-27/norma/llm"
 	"github.com/wpsec/ARTEX-local/agent"
+	"github.com/wpsec/ARTEX-local/db"
 	"github.com/wpsec/ARTEX-local/tools/report-eval"
 )
+
+func TestDeliveryReportTimeHintsUseBeijingAndKeepMissingExplicit(t *testing.T) {
+	if got, want := reportEvalTestTimeHint("2026-11-01T02:00:00Z"), "2026-11-01 10:00:00（北京时间）"; got != want {
+		t.Fatalf("UTC evaluation time hint=%q, want %q", got, want)
+	}
+	if got := reportEvalTestTimeHint("not-a-time"); got != "测试时间未记录" {
+		t.Fatalf("invalid evaluation time hint=%q, want missing marker", got)
+	}
+
+	bindings := []db.FindingTrafficBinding{{
+		ID:   7,
+		Role: "proof",
+		Note: "关键请求",
+		Snapshot: db.TrafficEvidenceSnapshot{
+			CapturedAt: time.Date(2026, time.November, 1, 2, 0, 0, 0, time.UTC).Unix(),
+		},
+	}}
+	index := deliveryEvidenceTimeIndex(bindings)
+	if !strings.Contains(index, "2026-11-01 10:00:00（北京时间）") || !strings.Contains(index, "关键请求") {
+		t.Fatalf("evidence time index omitted timestamp or purpose: %q", index)
+	}
+	if got, want := deliveryEvidenceTestTimeHint(bindings), "2026-11-01 10:00:00（北京时间，首条证据请求采集时间）"; got != want {
+		t.Fatalf("evidence test time hint=%q, want %q", got, want)
+	}
+	if got := deliveryEvidenceTimeIndex(nil); !strings.Contains(got, "没有绑定流量采集时间") {
+		t.Fatalf("empty evidence time index=%q, want explicit missing-time guidance", got)
+	}
+	if got := deliveryEvidenceTestTimeHint(nil); got != "测试时间未记录" {
+		t.Fatalf("empty evidence test time hint=%q, want missing marker", got)
+	}
+}
 
 type reportEvalProvider struct {
 	request llm.CompletionRequest
@@ -99,7 +132,7 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if provider.request.MaxTokens != deliveryReportMaxTokens {
 		t.Fatalf("evaluation max tokens=%d, want %d", provider.request.MaxTokens, deliveryReportMaxTokens)
 	}
-	if len(provider.request.System) != 1 || !strings.Contains(provider.request.System[0], "保存前由同一 Reporter 检查") {
+	if len(provider.request.System) != 1 || !strings.Contains(provider.request.System[0], "保存前在本次输出中核对结论、限制、修复和链路") {
 		t.Fatal("report generation call did not receive the same-Reporter self-check instructions")
 	}
 	if strings.Count(provider.request.System[0], agent.DeliveryReportDraftRules) != 1 {
@@ -108,12 +141,12 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if strings.Contains(provider.request.System[0], "# 系统或模块 功能或接口 缺陷：实际后果") {
 		t.Fatal("JSON draft instructions must not also require a full Markdown report")
 	}
-	for _, staleRule := range []string{"并发漏洞须使用并发工具或脚本验证", "把过滤或拒绝特殊字符列为修复", "文件名、所有者名称和权限位不能单独证明文件内容敏感", "已知入口"} {
+	for _, staleRule := range []string{"并发漏洞须使用并发工具或脚本验证", "把过滤或拒绝特殊字符列为修复", "文件名、所有者名称和权限位不能单独证明文件内容敏感"} {
 		if strings.Contains(provider.request.System[0], staleRule) {
 			t.Fatalf("compatibility draft generation retained superseded guidance %q", staleRule)
 		}
 	}
-	for _, rule := range []string{"样本身份不是实际登录凭证", "结果放在触发它的操作下面", "恒真、恒假条件只报告响应差异", "当前样本未验证该前提，评分需复核；不得同时写成已发生泄露", "已有向量时核对分数和等级"} {
+	for _, rule := range []string{"不要把占位主机、身份、Cookie 或 Token 改成真实测试条件", "每个请求或命令的结果缩进在该节点下", "响应差异只证明差异", "缺项写“未验证”", "漏洞名称和 CVSS 向量也不能代替影响证据"} {
 		if !strings.Contains(provider.request.System[0], rule) {
 			t.Fatalf("report generation instructions omitted rule %q", rule)
 		}
@@ -124,7 +157,9 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 			t.Fatalf("model input exposed internal review material %q", forbidden)
 		}
 	}
-	if !strings.Contains(prompt, "GET /api/jobs/job-a HTTP/1.1") || !strings.Contains(prompt, "user-b") {
+	if !strings.Contains(prompt, "GET /api/jobs/job-a HTTP/1.1") || !strings.Contains(prompt, "user-b") ||
+		!strings.Contains(prompt, `"request_line_index":"1. GET /api/jobs/job-a`) ||
+		!strings.Contains(prompt, "2. POST /api/jobs/job-a/types") {
 		t.Fatal("model input omitted the fixed sample evidence")
 	}
 	for _, required := range []string{`"synthetic":"true"`, "离线合成报文与记录", "攻击者已登录，知道 job-a 编号", "不带身份提交修改：HTTP 401", "没有取得正式文件正文"} {
@@ -172,11 +207,14 @@ func TestReportEvalPromptInputLabelsSyntheticMaterials(t *testing.T) {
 	if !strings.Contains(input["request_packet"], "/api/files/file-a/download") {
 		t.Fatal("dedicated request packet omitted the original request")
 	}
+	if !strings.Contains(input["request_line_index"], "1. GET /api/files/file-a/download") {
+		t.Fatalf("request line index omitted the exact path: %q", input["request_line_index"])
+	}
 	if input["cvss_vector_hint"] != sample.Facts.CVSSVector {
 		t.Fatalf("CVSS hint=%q, want %q", input["cvss_vector_hint"], sample.Facts.CVSSVector)
 	}
-	if input["test_time_hint"] != sample.TestTime {
-		t.Fatalf("test time hint=%q, want %q", input["test_time_hint"], sample.TestTime)
+	if want := "2026-11-01 10:00:00（北京时间）"; input["test_time_hint"] != want {
+		t.Fatalf("test time hint=%q, want %q", input["test_time_hint"], want)
 	}
 	concurrency, concurrencyMaterial, err := reporteval.Load("concurrency")
 	if err != nil {
@@ -188,6 +226,9 @@ func TestReportEvalPromptInputLabelsSyntheticMaterials(t *testing.T) {
 	}
 	if concurrencyInput["test_tool_hint"] != concurrency.Facts.TestTool {
 		t.Fatalf("test tool hint=%q, want %q", concurrencyInput["test_tool_hint"], concurrency.Facts.TestTool)
+	}
+	if strings.Count(concurrencyInput["request_line_index"], "POST /api/registrations") != 4 {
+		t.Fatalf("request line index omitted repeated request count: %q", concurrencyInput["request_line_index"])
 	}
 	nonHTTP, nonHTTPMaterial, err := reporteval.Load("non-http")
 	if err != nil {
@@ -257,48 +298,23 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"本次只生成交付报告草稿，不调用工具",
 		"平台生成标题、CVSS 行、五节标题和原始报文附件",
 		"只返回这个 JSON 对象",
-		"description 先写问题，再依次包含“### 定级依据”和依据正文",
+		"description 先用两三句写问题、成立条件和观察结果，再依次包含“### 定级依据”和一两句评分依据",
 		"test_process 依次包含“### 发现过程与攻击思路”“### 失败尝试与未验证项”“### Burp 复现”",
-		"discovery_path 包含“### 复测标准”和正文",
-		"attack_chain 只写简短树形节点",
-		"每个 HTTP 请求节点逐字保留证据中的 METHOD 和 path",
-		"不得硬截断或删除关键接口、结果、成立条件和未验证边界",
-		"不补请求正文；响应单独缩进到对应请求下，不用行内箭头",
+		"discovery_path 包含“### 复测标准”和一句可判定的复测条件",
+		"attack_chain 只写一棵短树。根节点使用实际页面或功能入口",
+		"HTTP 节点原样复制 METHOD/path",
 		"平台会添加 text 代码围栏",
-		"写作前按材料核对身份与权限、操作、请求或命令、实际结果、失败、未知项和来源",
-		"原始请求/响应和命令输出优先于 worker 总结、漏洞摘要和旧报告",
-		"只有缺陷行为已由材料确认时，才给对应的代码或配置修复",
-		"结果放在触发它的操作下面",
-		"并发操作才并列",
-		"只有材料明确记载并发测试时才标注“并发”",
-		"评分前提需复核",
-		"当前不提出代码修复建议",
-		"SQL 注入只给一个修复：使用参数化查询",
-		"布尔注入的恒真、恒假和 UNION 请求必须作为同一测试入口的并列分支",
-		"相同条件重复发送时保留请求次数和各次结果",
-		"只有证据说明后一操作依赖前一结果时才画成连续步骤",
-		"布尔注入的恒真、恒假和 UNION 请求必须作为同一测试入口的并列分支",
-		"测试过程逐项写明重复发送次数和结果",
-		"涉及数据变化时，攻击链保留写入前基线、写入操作和写入后回读",
-		"每个 HTTP 请求节点逐字保留证据中的 METHOD 和 path（含百分号编码、查询参数）",
-		"响应单独缩进到对应请求下，不用行内箭头",
-		"整张图只有一个根节点",
-		"五节分配上限（含节标题、子标题和链路）：描述 160、修复 80、测试过程 260、攻击链 160、证据说明 100 字符",
-		"当前样本未验证该前提，评分需复核；不得同时写成已发生泄露",
-		"只有材料明确记录客户端并发发送时才使用“并发提交”父节点",
-		"回读请求与并发组并列，放在所有并发请求之后",
+		"首条证据请求采集时间",
+		"不改变详细报告的章节和台账",
+		"修复建议只写一项与已确认行为相符的主要措施",
+		"不得让人替换 Host、认证头或样本占位值",
+		"正文以 800 字以内为目标，不硬截断",
+		"前后查询按时间顺序展示",
 		"### 定级依据",
 		"### 发现过程与攻击思路",
 		"### 失败尝试与未验证项",
 		"### Burp 复现",
 		"### 复测标准",
-		"保存前由同一 Reporter 检查",
-		"材料标注为合成样本时，说明是合成测试",
-		"缺少响应正文或账号依据",
-		"Repeater 串行重放不能证明并发",
-		"真实报告基于平台附加的授权原始请求",
-		"说明不能直接重放及真实复测需要的材料",
-		"未确认线索时不预测漏洞成立后应如何调整 CVSS",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("report completion prompt is missing %q", required)
@@ -511,25 +527,14 @@ func TestEnsureDeliveryAttackChainTextFence(t *testing.T) {
 	}
 }
 
-func TestNormalizeDeliveryReportTerminology(t *testing.T) {
-	if got, want := normalizeDeliveryReportTerminology("文件属主为 eval-admin；属主可读"), "文件所有者为 eval-admin；所有者可读"; got != want {
-		t.Fatalf("normalized terminology=%q, want %q", got, want)
+func TestEnsureDeliveryAttackChainUsesFirstEvidenceNodeWhenRootMissing(t *testing.T) {
+	input := "├─ GET /api/items\n   └─ 200 OK\n└─ POST /api/items\n   └─ 201 Created"
+	want := "```text\nGET /api/items\n   └─ 200 OK\n└─ POST /api/items\n   └─ 201 Created\n```"
+	if got := ensureDeliveryAttackChainTextFence(input); got != want {
+		t.Fatalf("rootless attack chain did not use its first request as the root: %q", got)
 	}
-}
-
-func TestNormalizeDeliveryReportRemediation(t *testing.T) {
-	input := map[string]string{"finding_name": "商品查询参数布尔盲注"}
-	got := normalizeDeliveryReportRemediation(input, "增加输入校验并使用参数化查询，避免拼接 SQL。")
-	if want := "对相关查询参数使用参数化查询，避免将用户输入拼接进 SQL 语句。"; got != want {
-		t.Fatalf("normalized remediation=%q, want %q", got, want)
-	}
-	nonInjection := normalizeDeliveryReportRemediation(map[string]string{"finding_name": "SQL Server 版本信息暴露"}, "限制版本信息响应。")
-	if nonInjection != "限制版本信息响应。" {
-		t.Fatalf("non-injection remediation changed: %q", nonInjection)
-	}
-	sessionFix := normalizeDeliveryReportRemediation(map[string]string{"finding_name": "退出登录后原会话仍能访问"}, "删除服务端记录或加入黑名单。")
-	if want := "服务端处理登出请求后应立即使当前会话失效，并拒绝后续使用该会话的请求。"; sessionFix != want {
-		t.Fatalf("session remediation=%q, want %q", sessionFix, want)
+	if got, want := ensureDeliveryAttackChainTextFence("Root\n└─ GET /api/items"), "```text\nGET /api/items\n```"; got != want {
+		t.Fatalf("placeholder root did not fall back to the first request: got %q want %q", got, want)
 	}
 }
 
@@ -556,28 +561,12 @@ func TestRepeatedDeliveryRequestRequiresUnambiguousMatch(t *testing.T) {
 	}
 }
 
-func TestDeliveryReportConcurrencyRequiresEvidence(t *testing.T) {
-	chain := "请求入口\n   └─ 并发父节点：\n      └─ POST /api/items"
-	if got := normalizeUnsupportedDeliveryConcurrency(chain, map[string]string{"summary": "普通用户修改作业配置"}); strings.Contains(got, "并发") || !strings.Contains(got, "请求关系未验证") {
-		t.Fatalf("unsupported concurrency claim was retained: %q", got)
-	}
+func TestDeliveryReportConcurrencyEvidenceHint(t *testing.T) {
 	if !hasExplicitDeliveryConcurrencyEvidence(map[string]string{"summary": "同一账号并发提交3次相同请求"}) {
 		t.Fatal("explicitly tested concurrency was not recognized")
 	}
 	if hasExplicitDeliveryConcurrencyEvidence(map[string]string{"summary": "并发未测试"}) {
 		t.Fatal("unverified concurrency was accepted as evidence")
-	}
-}
-
-func TestNormalizeSyntheticDeliveryReportBurp(t *testing.T) {
-	input := map[string]string{"synthetic": "true", "evidence_transport": "http"}
-	content := "### 发现过程与攻击思路\n合成请求。\n### Burp 复现\n在 Repeater 中替换 X-Eval-Actor 为真实凭证。\n### 失败尝试与未验证项\n未验证。"
-	got := normalizeSyntheticDeliveryReportBurp(input, content)
-	if strings.Contains(got, "替换 X-Eval-Actor") || !strings.Contains(got, "合成材料不能直接重放") || !strings.Contains(got, "### 失败尝试与未验证项") {
-		t.Fatalf("synthetic Repeater guidance was not safely normalized: %q", got)
-	}
-	if unchanged := normalizeSyntheticDeliveryReportBurp(map[string]string{}, content); unchanged != content {
-		t.Fatalf("real-report Burp guidance was changed: %q", unchanged)
 	}
 }
 
@@ -646,7 +635,7 @@ func TestDeliveryReportDraftDisablesConfiguredResponsesReasoning(t *testing.T) {
 	if request.Reasoning.Effort != "none" {
 		t.Fatalf("Responses API reasoning effort=%q, want none", request.Reasoning.Effort)
 	}
-	if !strings.Contains(request.Instructions, "保存前由同一 Reporter 检查") {
+	if !strings.Contains(request.Instructions, "保存前在本次输出中核对结论、限制、修复和链路") {
 		t.Fatal("report request did not include the same-Reporter self-check rules")
 	}
 	if draft.Description == "" || usage.OutputTokens != 420 {

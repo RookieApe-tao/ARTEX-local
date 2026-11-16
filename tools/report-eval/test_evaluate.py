@@ -17,13 +17,13 @@ class ReportEvaluationTest(unittest.TestCase):
         old = "const DeliveryReportWritingRules = `旧版规则`\n"
         current = (
             "const DeliveryReportRuntimeGuidance = `共享运行约定`\n\n"
-            "const DeliveryReportHardCaseGuidance = `边界规则`\n\n"
+            "const DeliveryReportEvidenceGuidance = `证据规则`\n\n"
             "const DeliveryReportStyleGuidance = `简短规则`\n\n"
             "const DeliveryReportWritingRules = DeliveryReportRuntimeGuidance + DeliveryReportStyleGuidance + `新版写作规则`\n"
-            "const DeliveryReportDraftRules = DeliveryReportRuntimeGuidance + DeliveryReportHardCaseGuidance + DeliveryReportStyleGuidance + `JSON 草稿规则`\n"
+            "const DeliveryReportDraftRules = DeliveryReportRuntimeGuidance + DeliveryReportEvidenceGuidance + DeliveryReportStyleGuidance + `JSON 草稿规则`\n"
         )
         self.assertEqual(EVAL.expand_go_policy(old), "旧版规则")
-        self.assertEqual(EVAL.expand_go_policy(current), "共享运行约定边界规则简短规则JSON 草稿规则")
+        self.assertEqual(EVAL.expand_go_policy(current), "共享运行约定证据规则简短规则JSON 草稿规则")
         for unsupported in (
             "const DeliveryReportWritingRules = unknown()\n",
             "const DeliveryReportWritingRules = `规则` + readSecret()\n",
@@ -136,6 +136,7 @@ class ReportEvaluationTest(unittest.TestCase):
             "### 定级依据",
             "## 修复建议",
             "## 测试过程",
+            "测试时间：2026-11-01 10:00:00（北京时间）",
             "### 发现过程与攻击思路",
             "### 失败尝试与未验证项",
             "### Burp 复现",
@@ -149,11 +150,16 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertTrue(measured["required_subheadings_ok"])
         self.assertTrue(measured["report_structure_ok"])
         self.assertTrue(measured["narrative_within_800_characters"])
+        self.assertTrue(measured["test_time_heading_present"])
+        self.assertTrue(measured["test_time_matches_input"])
         self.assertFalse(measured["verbatim_material_not_found"])
         self.assertIn("未自动判定", measured["semantic_quality"])
         report_body, appendix = report.split("### 原始材料", 1)
         too_long = EVAL.metrics(material, report_body + "x" * 801 + "\n### 原始材料" + appendix)
         self.assertFalse(too_long["narrative_within_800_characters"])
+
+        wrong_time = report.replace("2026-11-01 10:00:00", "2026-11-01 18:00:00")
+        self.assertFalse(EVAL.metrics(material, wrong_time)["test_time_matches_input"])
 
     def test_attack_chain_request_paths_are_checked_against_raw_evidence(self):
         case = EVAL.cases_by_id()["injection"]
@@ -172,6 +178,19 @@ class ReportEvaluationTest(unittest.TestCase):
         measured = EVAL.metrics(case, report)
         self.assertFalse(measured["attack_chain_request_paths_match_evidence"])
         self.assertIn("GET /api/products?name=alpha'", measured["attack_chain_request_paths_not_found"])
+
+    def test_attack_chain_metrics_detect_multiple_roots(self):
+        case = EVAL.cases_by_id()["idor"]
+        report = EVAL.attach_evidence(case, "\n".join([
+            "# 示例越权漏洞", "## 描述", "### 定级依据", "## 修复建议", "## 测试过程",
+            "### 发现过程与攻击思路", "### 失败尝试与未验证项", "### Burp 复现",
+            "## 攻击链路", "```text", "GET /api/jobs/job-a", "├─ 200 OK",
+            "POST /api/jobs/job-a/types", "└─ 200 OK", "```", "## 证据说明", "### 复测标准",
+        ]))
+        measured = EVAL.metrics(case, report)
+        self.assertEqual(measured["attack_chain_root_count"], 2)
+        self.assertFalse(measured["attack_chain_single_root"])
+        self.assertEqual(measured["attack_chain_disconnected_nodes"], ["POST /api/jobs/job-a/types"])
 
     def test_live_evaluation_only_accepts_loopback_and_renders_cvss_header(self):
         for url in ("https://example.com", "http://127.0.0.1.evil.test:8787", "http://user:placeholder@127.0.0.1:8787"):

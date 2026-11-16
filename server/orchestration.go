@@ -603,6 +603,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.upgradeReporterDeliveryTemplateV17() // 分离 Markdown 报告与 JSON 草稿规则，避免格式指令冲突
 	s.upgradeReporterDeliveryTemplateV18() // 统一事实整理、影响边界和攻击链顺序要求
 	s.upgradeReporterDeliveryTemplateV19() // 明确接口路径、字数检查和单一修复实现
+	s.upgradeReporterDeliveryTemplateV20() // 更新共享攻击链规范，避免旧默认提示词重复叠加
 	s.upgradeReporterTriggerMessage()      // 老库触发消息同步报告版式与链路图规范
 	s.upgradeReporterTriggerMessageV11()   // 移除触发消息中重复的报告写作规则
 	s.seedFindingTrafficTools()            // 增加可选证据参数及只读证据工具，保留用户配置
@@ -772,7 +773,8 @@ func reporterPromptHashNeedsTemplateUpgrade(hash string) bool {
 		"5a4985c0a7839ed1a9602d2bfa26342fbce264c0608a46d081ea467904ccbf3e", // v15 默认交付报告提示词
 		"92150e16f0ec293e597f4b5b0631ac1793a5515d93fb614c1449f2c79cae53df", // 当前版重复说明提示词
 		"786d3a6b59b52c4d998398d297f41091d2db0187d2f47f21c3f531e9ec5489c2", // v17 事实整理提示词
-		"17aa6f65e6d88922dc086b17730357c00b3ef9d55535a85d513eb3cc795ede4e": // v18 事实整理默认提示词
+		"17aa6f65e6d88922dc086b17730357c00b3ef9d55535a85d513eb3cc795ede4e", // v18 事实整理默认提示词
+		"2e629b3e35fcab552a9a901419af419dfb721ebf15a654e9f8443f1c44d2d3ee": // v19 旧版 Reporter 默认提示词
 		return true
 	default:
 		return false
@@ -875,6 +877,39 @@ func (s *Server) upgradeReporterDeliveryTemplateV19() {
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存报告篇幅与接口路径迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV20() {
+	const flag = "reporter_prompt_delivery_template_v20"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取共享链路提示词迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 同步共享攻击链规范失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已同步共享攻击链规范")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存共享链路提示词迁移标记失败: %v", err)
 	}
 }
 
