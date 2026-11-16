@@ -153,8 +153,10 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 		"正文每项陈述都须能对应到这些事实",
 		"状态码或响应头不能证明响应正文已返回",
 		"合成、演示或占位",
-		"跨账号访问成功、文件正文已返回或真实数据已泄露",
+		"不能单独证明跨账号访问成功、文件正文已返回、预期功能遭违反或真实数据已泄露",
 		"不得称为真实用户资料、敏感数据或实际泄露",
+		"VC:L 是潜在影响假设，不是已观察到的真实机密性影响",
+		"观察到重复结果只能确认重复结果",
 		"身份/权限证明",
 		"只建议一项针对已确认行为的可观察修复结果",
 		"不得建议把样本 Host、身份、认证头、Cookie 或 Token 替换成真实值",
@@ -163,9 +165,12 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 		"修复建议只写一项与已确认行为相符的主要措施",
 		"失败尝试只写实际做过且失败的操作",
 		"Repeater 串行重放不能证明并发",
-		"攻击链只画一棵树。根节点写材料中实际的页面或功能入口",
-		"HTTP 请求的 METHOD/path 必须逐字复制 request_line_index",
-		"真假条件、有效与无效凭证等对照请求并列，不画成互相依赖",
+		"攻击链只画一棵树。单一流程以材料中的页面或功能入口为根",
+		"根节点可用“验证请求组”仅作分组",
+		"每个 HTTP 请求或命令行都必须缩进并以 ├─ 或 └─ 开始",
+		"命令及路径必须逐字复制原始记录",
+		"HTTP METHOD/path 必须逐字复制 request_line_index",
+		"独立对照放在单独分支，不得接在主流程结果之后造成因果暗示",
 		"回读查询放在并发组之后",
 		"多条请求不等于并发",
 		"正文尽量控制在 800 字以内，不硬截断",
@@ -187,7 +192,8 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 	}
 	if strings.Contains(DeliveryReportWritingRules, "JSON 的 description 字段") || !strings.Contains(DeliveryReportDraftRules, "description 先用两三句写问题") ||
 		!strings.Contains(DeliveryReportDraftRules, "cvss_vector 优先使用输入提供的有效向量") ||
-		!strings.Contains(DeliveryReportDraftRules, "attack_chain 只写一棵短树。根节点使用实际页面或功能入口") {
+		!strings.Contains(DeliveryReportDraftRules, "attack_chain 只写一棵短树。单一流程的根节点使用实际页面或功能入口") ||
+		!strings.Contains(DeliveryReportDraftRules, "格式示例：\n验证请求组\n├─ 主流程") {
 		t.Fatal("JSON draft format rules must stay separate from the full Markdown Reporter rules")
 	}
 }
