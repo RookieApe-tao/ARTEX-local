@@ -315,6 +315,13 @@ func ensureDeliveryAttackChainTextFence(content string) string {
 		for _, line := range treeLines {
 			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 			trimmed := strings.TrimSpace(line)
+			if strings.Trim(trimmed, "│ ") == "" {
+				continue
+			}
+			if markerOffset := strings.IndexAny(trimmed, "├└"); markerOffset > 0 && strings.ContainsRune(trimmed[:markerOffset], '│') {
+				indent += strings.Repeat(" ", utf8.RuneCountInString(trimmed[:markerOffset]))
+				trimmed = strings.TrimLeft(trimmed[markerOffset:], " ")
+			}
 			marker := ""
 			for _, candidate := range []string{"├─", "└─"} {
 				if strings.HasPrefix(trimmed, candidate) {
@@ -340,7 +347,47 @@ func ensureDeliveryAttackChainTextFence(content string) string {
 	if content == "" {
 		return content
 	}
+	content = strings.Join(normalizeDeliveryAttackTreeBranches(strings.Split(content, "\n")), "\n")
 	return "```text\n" + content + "\n```"
+}
+
+func normalizeDeliveryAttackTreeBranches(lines []string) []string {
+	type branch struct {
+		lineIndex int
+		indent    int
+		marker    string
+	}
+	branches := make([]branch, 0, len(lines))
+	for index, line := range lines {
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		rest := line[indent:]
+		for _, marker := range []string{"├─", "└─"} {
+			if strings.HasPrefix(rest, marker) {
+				branches = append(branches, branch{lineIndex: index, indent: indent, marker: marker})
+				break
+			}
+		}
+	}
+	for index, current := range branches {
+		hasFollowingSibling := false
+		for _, next := range branches[index+1:] {
+			if next.indent < current.indent {
+				break
+			}
+			if next.indent == current.indent {
+				hasFollowingSibling = true
+				break
+			}
+		}
+		marker := "└─"
+		if hasFollowingSibling {
+			marker = "├─"
+		}
+		line := lines[current.lineIndex]
+		rest := strings.TrimLeft(line[current.indent+len(current.marker):], " ")
+		lines[current.lineIndex] = line[:current.indent] + marker + " " + rest
+	}
+	return lines
 }
 
 func completeDeliveryReportWith(

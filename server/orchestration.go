@@ -766,7 +766,7 @@ func reporterPromptNeedsTemplateUpgrade(prompt string) bool {
 }
 
 func (s *Server) upgradeReporterDeliveryTemplate() {
-	const flag = "reporter_prompt_delivery_template_v12"
+	const flag = "reporter_prompt_delivery_template_v13"
 	value, _, err := s.m.pg.GetSetting(flag)
 	if err != nil {
 		log.Printf("[reporter] 读取固定模板迁移标记失败: %v", err)
@@ -809,7 +809,7 @@ func (s *Server) upgradeReporterDeliveryTemplate() {
 			log.Printf("[reporter] 升级固定交付模板失败: %v", err)
 			return
 		}
-		log.Printf("[reporter] 默认 prompt 已升级为重点事实边界和短报告规范")
+		log.Printf("[reporter] 默认 prompt 已升级为简明事实边界和短报告规范")
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存固定模板 prompt 迁移标记失败: %v", err)

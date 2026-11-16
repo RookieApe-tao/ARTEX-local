@@ -102,6 +102,11 @@ func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	if len(provider.request.System) != 1 || !strings.Contains(provider.request.System[0], "保存前由同一 Reporter 自查") {
 		t.Fatal("report generation call did not receive the same-Reporter self-check instructions")
 	}
+	for _, rule := range []string{"不得建议替换认证字段", "回读查询与各次请求结果分支对齐", "SQL 真假常量", "文件名、所有者名称和权限位不能单独证明文件内容敏感", "不得另行给出冲突的危害等级"} {
+		if !strings.Contains(provider.request.System[0], rule) {
+			t.Fatalf("report generation instructions omitted rule %q", rule)
+		}
+	}
 	prompt := provider.request.Messages[0].Text()
 	for _, forbidden := range []string{"reference_report", "must_preserve", "must_not_claim", `"id":"E`} {
 		if strings.Contains(prompt, forbidden) {
@@ -321,14 +326,18 @@ func TestEnsureDeliveryAttackChainTextFence(t *testing.T) {
 		t.Fatalf("chain with duplicated language label=%q, want %q", got, want)
 	}
 	arrowChain := "入口：普通用户登录 -> POST /api/jobs/job-a/types -> 作业状态发生变化"
-	if got, want := ensureDeliveryAttackChainTextFence(arrowChain), "```text\n普通用户登录\n   └─ POST /api/jobs/job-a/types\n   └─ 作业状态发生变化\n```"; got != want {
+	if got, want := ensureDeliveryAttackChainTextFence(arrowChain), "```text\n普通用户登录\n   ├─ POST /api/jobs/job-a/types\n   └─ 作业状态发生变化\n```"; got != want {
 		t.Fatalf("arrow chain=%q, want %q", got, want)
 	}
 	if got, want := ensureDeliveryAttackChainTextFence("用户持有会话\n    └─ ↓\n    └─ > GET /api/me"), "```text\n用户持有会话\n    └─ GET /api/me\n```"; got != want {
 		t.Fatalf("decorated tree=%q, want %q", got, want)
 	}
+	misaligned := "登记请求\n└─ 并发提交相同编号\n   ├─ 请求 A 返回 201\n│  └─ 回读查询得到三条记录"
+	if got, want := ensureDeliveryAttackChainTextFence(misaligned), "```text\n登记请求\n└─ 并发提交相同编号\n   ├─ 请求 A 返回 201\n   └─ 回读查询得到三条记录\n```"; got != want {
+		t.Fatalf("misaligned tree=%q, want %q", got, want)
+	}
 	decorated := "```text\n用户已登录且知晓目标作业编号\n   └─ ↓\n   └─ POST /api/jobs/job-a/types\n   └─ ↓\n   └─ 服务端未校验所有权，直接接受修改\n```"
-	want := "```text\n用户已登录且知晓目标作业编号\n   └─ POST /api/jobs/job-a/types\n   └─ 服务端未校验所有权，直接接受修改\n```"
+	want := "```text\n用户已登录且知晓目标作业编号\n   ├─ POST /api/jobs/job-a/types\n   └─ 服务端未校验所有权，直接接受修改\n```"
 	if got := ensureDeliveryAttackChainTextFence(decorated); got != want {
 		t.Fatalf("decorated model tree=%q, want %q", got, want)
 	}
