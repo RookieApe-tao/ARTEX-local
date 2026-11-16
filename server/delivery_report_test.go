@@ -50,6 +50,24 @@ func TestDeliveryReportWithoutBoundTrafficDoesNotInventPackets(t *testing.T) {
 	}
 }
 
+func TestDeliveryReportRequestLineIndexPreservesEncodedPathsAndCounts(t *testing.T) {
+	packet := "" +
+		"证据绑定 1\n" +
+		"GET /api/items?id=a%2Fb HTTP/1.1\r\nHost: example.test\r\n\r\n\n" +
+		"证据绑定 2\n" +
+		"POST /api/items HTTP/1.1\r\nHost: example.test\r\n\r\n{}\n" +
+		"证据绑定 3\n" +
+		"GET /api/items?id=a%2Fb HTTP/1.1\r\nHost: example.test\r\n\r\n"
+
+	want := "1. GET /api/items?id=a%2Fb\n2. POST /api/items\n3. GET /api/items?id=a%2Fb"
+	if got := deliveryReportRequestLineIndex(packet); got != want {
+		t.Fatalf("request line index = %q, want %q", got, want)
+	}
+	if got := deliveryReportRequestLineIndex("没有留存 HTTP 请求行"); got != "" {
+		t.Fatalf("request line index without HTTP evidence = %q, want empty", got)
+	}
+}
+
 func TestDeliveryReportUsesAllBoundPacketsWithoutRedactingCredentials(t *testing.T) {
 	dataDir := t.TempDir()
 	managerDir := filepath.Join(dataDir, "manager")
@@ -379,46 +397,39 @@ VALUES(?,?,?,?,?)`, id, requestHead, responseHead, []byte(requestBody), []byte(r
 func deliveryReportFixture(description, vector string) string {
 	return fmt.Sprintf(`# 测试系统-模块 /test 测试缺陷：测试结果
 
-漏洞名称：测试系统-模块 /test 测试缺陷
 CVSS 4.0：%s  评分 待计算（待计算）
 
 ## 描述
 
 %s
-
 ### 定级依据
+现有证据只支持当前已观察到的影响，其他影响未验证。
 
-此为合成测试，影响未验证。
+## 修复建议
 
-## 修复
-
-配置和源码位置未验证。
+现有材料不足以定位具体实现，需结合源码确认修复位置。
 
 ## 测试过程
 
 ### 发现过程与攻击思路
-
-工具、参数、判据和时间未记录。
-
+材料没有提供可复现的请求或命令，具体步骤未验证。
 ### 失败尝试与未验证项
-
-未取得失败尝试记录，实际影响未验证。
+实际影响未验证；没有记录的操作不补写为失败尝试。
+### Burp 复现
+协议未确认，Burp Repeater 复测未验证。
 
 ## 攻击链路
 
-利用前提和影响未验证。
+~~~text
+账号权限和利用前提未验证
+└─ 请求结果和业务影响未验证
+~~~
 
 ## 证据说明
 
-来源为本地合成测试记录。
-
-### Burp 复现
-
-原始请求未采集，Burp 复测未验证。
-
+来源为本地合成测试记录，未采集原始请求和响应。
 ### 复测标准
-
-业务判据未验证。`, vector, description)
+取得完整请求与响应后，按授权账号复现，并核对实际业务数据变化。`, vector, description)
 }
 
 func deliveryPacketFixture(t *testing.T, store *evidence.Store, requestHead, requestBody, responseHead, responseBody string) db.TrafficEvidenceSnapshot {

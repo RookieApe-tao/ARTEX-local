@@ -1,7 +1,7 @@
 import { CopyButton } from "@/components/copy-button";
 import { Markdown } from "@/components/markdown";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { applyCVSSMetadata } from "@/lib/delivery-report";
 
 export function DeliveryReportSection({
@@ -19,10 +19,11 @@ export function DeliveryReportSection({
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between gap-3">
-        <CardTitle className="text-sm">交付报告</CardTitle>
-        {report ? <CopyButton text={report} label="复制交付报告" successMessage="已复制交付报告" /> : null}
-      </CardHeader>
+      {report ? (
+        <CardHeader className="flex-row justify-end">
+          <CopyButton text={report} label="复制交付报告" successMessage="已复制交付报告" />
+        </CardHeader>
+      ) : null}
       <CardContent className="space-y-3">
         {stale ? (
           <Alert>

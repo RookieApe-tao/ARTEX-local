@@ -9,6 +9,7 @@ test("new report headers use the calculated score without legacy duplicates", ()
   const content = [
     "# 系统-模块 接口 缺陷：后果",
     "",
+    "漏洞名称：系统-模块 接口 缺陷",
     "CVSS 4.0：model-vector  评分 1.0（低危）",
     "- **CVSS 4.0 Base 向量（CVSS-B）**：old-vector",
     "- **CVSS 4.0 评分**：1.0（CVSS-B）",
@@ -20,14 +21,15 @@ test("new report headers use the calculated score without legacy duplicates", ()
   ].join("\n");
   const result = applyCVSSMetadata(content, vector);
   assert.equal(result.split(singleLine).length - 1, 1);
-  assert.doesNotMatch(result, /model-vector|old-vector|duplicate|CVSS-B|漏洞等级/);
+  assert.doesNotMatch(result, /漏洞名称：|model-vector|old-vector|duplicate|CVSS-B|漏洞等级/);
   assert.equal(applyCVSSMetadata(result, vector), result);
 });
 
-test("legacy report headers keep their three-line layout and receive calculated values", () => {
+test("legacy report headers collapse to one title and one calculated CVSS line", () => {
   const content = [
     "# 原报告",
     "",
+    "漏洞名称：重复标题",
     "- **CVSS 4.0 Base 向量（CVSS-B）**：model-vector",
     "- **CVSS 4.0 评分**：1.0（CVSS-B）",
     "- **漏洞等级**：低危",
@@ -36,10 +38,10 @@ test("legacy report headers keep their three-line layout and receive calculated 
     "原有内容。",
   ].join("\n");
   const result = applyCVSSMetadata(content, vector);
-  assert.ok(result.includes(`- **CVSS 4.0 Base 向量（CVSS-B）**：${vector}`));
-  assert.ok(result.includes("- **CVSS 4.0 评分**：7.3（CVSS-B）"));
-  assert.ok(result.includes("- **漏洞等级**：高危"));
-  assert.ok(!result.includes(singleLine));
+  assert.equal(result.split(singleLine).length - 1, 1);
+  assert.doesNotMatch(result, /漏洞名称：|CVSS-B|漏洞等级/);
+  assert.ok(result.includes("## 漏洞描述"));
+  assert.equal(applyCVSSMetadata(result, vector), result);
 });
 
 test("missing metadata is inserted in the header without changing HTTP evidence", () => {
@@ -80,17 +82,16 @@ test("an unclosed fence never receives metadata inside the captured content", ()
   for (const fence of ["```", "~~~"]) {
     const evidence = `${fence}http\nHTTP/1.1 200 OK\n\n# captured-title\nCVSS 4.0：captured-value`;
     const result = applyCVSSMetadata(evidence, vector);
-    assert.ok(result.startsWith(`\n${singleLine}\n`));
+    assert.ok(result.startsWith(`${singleLine}\n`));
     assert.ok(result.endsWith(evidence));
     assert.equal(applyCVSSMetadata(result, vector), result);
   }
 });
 
-test("partial legacy metadata is completed without duplicating the existing score", () => {
+test("partial legacy metadata is replaced with a single CVSS line", () => {
   const result = applyCVSSMetadata("# 报告\n\n- **CVSS 4.0 评分**：1.0\n\n## 描述\n结果。", vector);
-  assert.equal(result.split("- **CVSS 4.0 评分**：").length - 1, 1);
-  assert.ok(result.includes(`- **CVSS 4.0 Base 向量（CVSS-B）**：${vector}`));
-  assert.ok(result.includes("- **漏洞等级**：高危"));
+  assert.equal(result.split(singleLine).length - 1, 1);
+  assert.doesNotMatch(result, /CVSS-B|漏洞等级/);
   assert.equal(applyCVSSMetadata(result, vector), result);
 });
 

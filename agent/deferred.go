@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/Autumn-27/norma/llm"
 	actool "github.com/Autumn-27/norma/tool"
@@ -16,7 +17,21 @@ import (
 // skill loads. Returns a single plain segment + boundary 0 when there is no global
 // block to add.
 func deferredSystem(sysText string, def DeferredInfo) (system []string, boundary int) {
-	sysText += def.FindingGuidance
+	guidance := def.FindingGuidance
+	// Stock prompts already contain these rules; custom prompts receive them here.
+	if strings.Contains(sysText, DeliveryReportRuntimeGuidance) {
+		guidance = strings.Replace(guidance, DeliveryReportRuntimeGuidance, "", 1)
+	}
+	if strings.Contains(sysText, DeliveryReportChainGuidance) {
+		guidance = strings.Replace(guidance, DeliveryReportChainGuidance, "", 1)
+	}
+	if strings.Contains(sysText, DeliveryReportEvidenceGuidance) {
+		guidance = strings.Replace(guidance, DeliveryReportEvidenceGuidance, "", 1)
+	}
+	if strings.Contains(sysText, DeliveryReportStyleGuidance) {
+		guidance = strings.Replace(guidance, DeliveryReportStyleGuidance, "", 1)
+	}
+	sysText += guidance
 	block := actool.RenderDeferredToolsBlock(def.GlobalNames)
 	if block == "" {
 		return []string{sysText}, 0

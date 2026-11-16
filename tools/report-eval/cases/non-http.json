@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "non-http",
+  "kind": "non_http",
+  "name": "本地备份文件权限过宽",
+  "synthetic": true,
+  "test_time": "2026-11-01T10:00:00+08:00",
+  "target": "/tmp/report-eval",
+  "facts": {
+    "observations": [
+      "eval-user 是普通本地用户。",
+      "customer-notes.txt 的所有者为 eval-admin，权限为 644；eval-user 能读出固定合成记录。",
+      "相邻 private-notes.txt 无读取权限。"
+    ],
+    "conditions": [
+      "需要在同一测试主机上以普通用户权限执行命令。"
+    ],
+    "limitations": [
+      "仅检查指定文件，没有取得其他目录或系统文件内容。",
+      "未测试管理员提权、远程利用或写入。"
+    ],
+    "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+  },
+  "evidence": [
+    {
+      "id": "E01",
+      "purpose": "当前用户",
+      "source": "离线合成终端记录",
+      "command": "id",
+      "stdout": "uid=1002(eval-user) gid=1002(eval-user) groups=1002(eval-user)\n",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "id": "E02",
+      "purpose": "备份文件权限",
+      "source": "离线合成终端记录",
+      "command": "stat -c '%a %U %G %n' /tmp/report-eval/backups/customer-notes.txt",
+      "stdout": "644 eval-admin eval-admin /tmp/report-eval/backups/customer-notes.txt\n",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "id": "E03",
+      "purpose": "读取备份",
+      "source": "离线合成终端记录",
+      "command": "cat /tmp/report-eval/backups/customer-notes.txt",
+      "stdout": "EVAL_ONLY customer-a: synthetic test note\n",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "id": "E04",
+      "purpose": "读取相邻受限文件",
+      "source": "离线合成终端记录",
+      "command": "cat /tmp/report-eval/backups/private-notes.txt",
+      "stdout": "",
+      "stderr": "cat: /tmp/report-eval/backups/private-notes.txt: Permission denied\n",
+      "exit_code": 1
+    }
+  ],
+  "review": {
+    "must_preserve": [
+      "说明这是本地文件权限问题，保留实际命令和输出。",
+      "明确只读到合成备份，不扩展为任意文件读取。",
+      "合成内容不证明真实数据泄露；VC:L 的评分前提需结合真实文件内容复核。"
+    ],
+    "must_not_claim": [
+      "不得把合成记录称为敏感数据或真实信息泄露。",
+      "不得伪造 HTTP 接口或声称远程利用、管理员权限、所有文件可读。"
+    ],
+    "evidence_gaps": [
+      "仅检查指定文件，没有取得其他目录或系统文件内容。",
+      "未测试管理员提权、远程利用或写入。"
+    ]
+  },
+  "reference_report": "non-http.reference.md"
+}

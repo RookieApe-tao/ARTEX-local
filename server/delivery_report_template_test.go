@@ -21,21 +21,30 @@ func TestValidateDeliveryReportTemplate(t *testing.T) {
 		{"fixed template", valid, true},
 		{"CRLF", strings.ReplaceAll(valid, "\n", "\r\n"), true},
 		{"packet contains headings", valid + "\n\n" + markdownPacketBlock("HTTP/1.1 200 OK\n\n## 描述\n### Burp 复现"), true},
-		{"tree contains headings", strings.Replace(valid, "利用前提和影响未验证。", "```text\n账号 A\n└ 请求及影响未验证\n## 修复\n```", 1), true},
+		{"tree contains headings", strings.Replace(valid, "请求结果和业务影响未验证", "请求结果和业务影响未验证\n## 修复建议\n", 1), true},
 		{"no title", strings.Replace(valid, "# 测试系统-模块 /test 测试缺陷：测试结果", "测试报告", 1), false},
-		{"no finding name", strings.Replace(valid, "漏洞名称：测试系统-模块 /test 测试缺陷", "", 1), false},
+		{"duplicate finding name", strings.Replace(valid, "CVSS 4.0：", "漏洞名称：测试系统-模块 /test 测试缺陷\nCVSS 4.0：", 1), false},
 		{"invalid header vector", strings.Replace(valid, vector, "CVSS:4.0/AV:N", 1), false},
-		{"missing attack chain", strings.Replace(valid, "## 攻击链路", "### 攻击链路", 1), false},
+		{"attack chain without tree", strings.Replace(valid, "└─ 请求结果和业务影响未验证", "请求结果和业务影响未验证", 1), false},
+		{"attack chain has multiple roots", strings.Replace(valid, "└─ 请求结果和业务影响未验证", "另一个请求根节点\n└─ 请求结果和业务影响未验证", 1), false},
+		{"attack chain splits into multiple trees", strings.Replace(valid, "## 证据说明", "```text\n第二个根节点\n└─ 第二个结果\n```\n\n## 证据说明", 1), false},
 		{"packet cannot supply attack chain", strings.Replace(valid, "## 攻击链路", "```http\n## 攻击链路\n```", 1), false},
 		{"comment cannot supply attack chain", strings.Replace(valid, "## 攻击链路", "<!--\n## 攻击链路\n-->", 1), false},
-		{"wrong section order", strings.Replace(valid, "## 修复", "## 测试过程", 1), false},
+		{"wrong section order", strings.Replace(valid, "## 修复建议", "## 测试过程", 1), false},
 		{"duplicate section", valid + "\n\n## 描述\n重复章节。", false},
-		{"empty remediation", strings.Replace(valid, "配置和源码位置未验证。", " \t\n", 1), false},
-		{"missing failure subsection", strings.Replace(valid, "### 失败尝试与未验证项", "### 其他记录", 1), false},
-		{"packet cannot supply Burp subsection", strings.Replace(valid, "### Burp 复现", "~~~http\n### Burp 复现\n~~~", 1), false},
-		{"indented code cannot supply subsection", strings.Replace(valid, "### Burp 复现", "\t### Burp 复现", 1), false},
-		{"empty retest subsection", strings.Replace(valid, "业务判据未验证。", "", 1), false},
-		{"comment-only subsection", strings.Replace(valid, "业务判据未验证。", "<!-- TODO -->", 1), false},
+		{"empty remediation", strings.Replace(valid, "现有材料不足以定位具体实现，需结合源码确认修复位置。", " \t\n", 1), false},
+		{"unexpected nested heading", strings.Replace(valid, "### 发现过程与攻击思路", "### 非预期栏目\n\n### 发现过程与攻击思路", 1), false},
+		{"missing required subsection", strings.Replace(valid, "### 复测标准", "### 其他标题", 1), false},
+		{"no forced time or tool ledger", valid, true},
+		{"timestamp wording is not a format gate", strings.Replace(valid, "协议未确认，Burp Repeater 复测未验证。", "测试时间：2026-11-01 10:00:00。协议和工具未记录。", 1), true},
+		{"Burp wording is reviewed as content", strings.Replace(valid, "协议未确认，Burp Repeater 复测未验证。", "协议未确认，HTTP 工具复测未验证。", 1), true},
+		{"non-HTTP Burp note", strings.Replace(valid, "协议未确认，Burp Repeater 复测未验证。", "Burp 不适用：本地命令验证。", 1), true},
+		{"repeated CVSS in body", strings.Replace(valid, "来源为本地合成测试记录，未采集原始请求和响应。", "CVSS 4.0："+vector, 1), false},
+		{"risk rationale in body", strings.Replace(valid, "重复请求的实际影响未验证。", "当前材料支持低危判断，重复请求的其他影响未验证。", 1), true},
+		{"SQL remediation quality is reviewed as content", strings.Replace(strings.Replace(valid, "重复请求的实际影响未验证。", "SQL 注入结论待核实。", 1), "现有材料不足以定位具体实现，需结合源码确认修复位置。", "对 name 字段进行输入校验与过滤。", 1), true},
+		{"unsupported extraction wording is reviewed as content", strings.Replace(valid, "重复请求的实际影响未验证。", "真假响应差异只能说明响应不同，未取得数据。", 1), true},
+		{"internal wording is not a save rejection", strings.Replace(valid, "重复请求的实际影响未验证。", "W07 的归属对照仍需核验。", 1), true},
+		{"domain term in body", strings.Replace(valid, "重复请求的实际影响未验证。", "响应中的文件所有者与测试账号不一致，其他影响未验证。", 1), true},
 		{"inline XSS payload", strings.Replace(valid, "重复请求的实际影响未验证。", "测试参数包含 `<!--`，实际影响未验证。", 1), true},
 		{"multiple-backtick payload", strings.Replace(valid, "重复请求的实际影响未验证。", "测试参数包含 ``x`<!--``，实际影响未验证。", 1), true},
 		{"fence info contains comment syntax", strings.Replace(valid, "重复请求的实际影响未验证。", "```text <!--\n实际影响未验证。\n```", 1), true},
@@ -72,6 +81,26 @@ func TestFindingReportToolRejectsInvalidTemplateBeforeDatabase(t *testing.T) {
 }
 
 func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T) {
+	if !reporterPromptHashNeedsTemplateUpgrade("92150e16f0ec293e597f4b5b0631ac1793a5515d93fb614c1449f2c79cae53df") {
+		t.Fatal("previous default prompt with duplicated JSON and Markdown rules would not receive the migration")
+	}
+	if !reporterPromptHashNeedsTemplateUpgrade("786d3a6b59b52c4d998398d297f41091d2db0187d2f47f21c3f531e9ec5489c2") {
+		t.Fatal("previous v17 default prompt would not receive the unified fact and evidence rules")
+	}
+	if !reporterPromptHashNeedsTemplateUpgrade("17aa6f65e6d88922dc086b17730357c00b3ef9d55535a85d513eb3cc795ede4e") {
+		t.Fatal("previous v18 default prompt would not receive the updated length and endpoint rules")
+	}
+	const previousV19Hash = "2e629b3e35fcab552a9a901419af419dfb721ebf15a654e9f8443f1c44d2d3ee"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV19Hash) {
+		t.Fatal("previous v19 stock prompt would keep duplicating the shared chain rules")
+	}
+	const previousV20Hash = "29a290fbc2d42bce7cf282b8c4da46605ee4deac38b9cf7df2500dad13d8171f"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV20Hash) {
+		t.Fatal("previous v20 stock prompt would miss the updated evidence boundaries")
+	}
+	if reporterPromptNeedsTemplateUpgrade("previous v19 stock prompt\n用户自定义要求。") {
+		t.Fatal("an edited v19 prompt must not be migrated over")
+	}
 	previous, err := os.ReadFile("testdata/reporter-default-v3.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -83,9 +112,81 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptNeedsTemplateUpgrade(attackChainOnly) {
 		t.Fatal("attack-chain-only stock default would not receive the fixed template")
 	}
-	for _, customized := range []string{string(previous) + "\n用户自定义要求。", "自定义报告模板", agent.ReporterDefaultPrompt} {
+	latestPrevious, err := os.ReadFile("testdata/reporter-default-v4.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reporterPromptNeedsTemplateUpgrade(string(latestPrevious)) {
+		t.Fatal("previous stock tree-template default would not receive the concise delivery rules")
+	}
+	previousV9, err := os.ReadFile("testdata/reporter-default-v9.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reporterPromptNeedsTemplateUpgrade(string(previousV9)) {
+		t.Fatal("previous v9 stock default would not receive the simplified writing rules")
+	}
+	previousV10, err := os.ReadFile("testdata/reporter-default-v10.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reporterPromptNeedsTemplateUpgrade(string(previousV10)) {
+		t.Fatal("previous v10 stock default would not receive the stricter evidence boundaries")
+	}
+	previousV11, err := os.ReadFile("testdata/reporter-default-v11.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reporterPromptNeedsTemplateUpgrade(string(previousV11)) {
+		t.Fatal("previous v11 stock default would not receive concise hard-case examples")
+	}
+	previousV13, err := os.ReadFile("testdata/reporter-default-v13.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reporterPromptNeedsTemplateUpgrade(string(previousV13)) {
+		t.Fatal("previous v13 stock default would not receive the current evidence rules")
+	}
+	previousV14, err := os.ReadFile("testdata/reporter-default-v14.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reporterPromptNeedsTemplateUpgrade(string(previousV14)) {
+		t.Fatal("previous v14 stock default would not receive the current concise rules")
+	}
+	for _, customized := range []string{string(previous) + "\n用户自定义要求。", string(latestPrevious) + "\n用户自定义要求。", string(previousV9) + "\n用户自定义要求。", string(previousV10) + "\n用户自定义要求。", string(previousV11) + "\n用户自定义要求。", string(previousV13) + "\n用户自定义要求。", string(previousV14) + "\n用户自定义要求。", "自定义报告模板", agent.ReporterDefaultPrompt} {
 		if reporterPromptNeedsTemplateUpgrade(customized) {
 			t.Fatal("custom or already current prompt would be replaced")
+		}
+	}
+}
+
+func TestReporterTriggerUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T) {
+	for _, previous := range []string{reporterToolCallMessageV1, reporterToolCallMessageV2, reporterToolCallMessageV2Legacy, reporterToolCallMessageV3, reporterToolCallMessageV4, reporterToolCallMessageV5, reporterToolCallMessageV6, reporterToolCallMessageV7, reporterToolCallMessageV8, reporterToolCallMessageV9, reporterToolCallMessageV10} {
+		if !reporterTriggerMessageNeedsUpgrade(previous) {
+			t.Fatal("previous stock trigger would retain superseded delivery instructions")
+		}
+	}
+	for _, preserved := range []string{reporterToolCallMessage, reporterToolCallMessageV10 + "\n用户自定义要求。", "自定义触发内容"} {
+		if reporterTriggerMessageNeedsUpgrade(preserved) {
+			t.Fatal("custom or already current trigger would be replaced")
+		}
+	}
+}
+
+func TestReporterToolDescriptionUpgradeRecognizesPreviousVersions(t *testing.T) {
+	previous := previousFindingReportToolDescriptions()
+	if len(previous) != 10 {
+		t.Fatalf("expected ten historical tool descriptions, got %d", len(previous))
+	}
+	for _, description := range previous {
+		if !reporterToolDescriptionNeedsTemplateUpgrade(description) {
+			t.Fatal("previous stock tool description would retain superseded delivery instructions")
+		}
+	}
+	for _, preserved := range []string{findingReportToolDescription, findingReportToolDescription + " 用户自定义要求。", "自定义工具说明"} {
+		if reporterToolDescriptionNeedsTemplateUpgrade(preserved) {
+			t.Fatal("current or customized tool description would be replaced")
 		}
 	}
 }

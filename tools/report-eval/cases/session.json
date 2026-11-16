@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "session",
+  "kind": "http",
+  "name": "退出登录后原会话仍能访问",
+  "synthetic": true,
+  "test_time": "2026-11-01T10:00:00+08:00",
+  "target": "https://report-eval.invalid",
+  "facts": {
+    "observations": [
+      "退出前会话可以读取 user-a 的用户信息。",
+      "同一会话请求退出接口后返回 ok=true。",
+      "退出后立即重放同一会话仍返回 user-a 的用户信息。",
+      "不带会话的相同查询返回 401。"
+    ],
+    "conditions": [
+      "攻击者需要事先持有该会话；本次没有验证会话取得方式。"
+    ],
+    "limitations": [
+      "只验证退出后立即重放，没有测量会话继续有效的最长时间。",
+      "修改密码、管理员停用、跨设备和写操作未验证。"
+    ],
+    "cvss_vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+  },
+  "evidence": [
+    {
+      "id": "E01",
+      "purpose": "退出前查询",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "GET /api/me HTTP/1.1\r\nHost: report-eval.invalid\r\nCookie: session=<SYNTHETIC_SESSION_A>\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 31\r\n\r\n{\"id\":\"user-a\",\"role\":\"member\"}"
+    },
+    {
+      "id": "E02",
+      "purpose": "退出登录",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "POST /api/logout HTTP/1.1\r\nHost: report-eval.invalid\r\nCookie: session=<SYNTHETIC_SESSION_A>\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\n{\"ok\":true}"
+    },
+    {
+      "id": "E03",
+      "purpose": "退出后重放原会话",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "GET /api/me HTTP/1.1\r\nHost: report-eval.invalid\r\nCookie: session=<SYNTHETIC_SESSION_A>\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 31\r\n\r\n{\"id\":\"user-a\",\"role\":\"member\"}"
+    },
+    {
+      "id": "E04",
+      "purpose": "不带会话查询",
+      "source": "离线合成报文，不对应真实网络请求",
+      "request_complete": true,
+      "response_complete": true,
+      "request": "GET /api/me HTTP/1.1\r\nHost: report-eval.invalid\r\nContent-Length: 0\r\n\r\n",
+      "response": "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: 35\r\n\r\n{\"error\":\"authentication_required\"}"
+    }
+  ],
+  "review": {
+    "must_preserve": [
+      "明确会话必须事先获得，不能写成任意用户直接接管。",
+      "保留退出前、退出响应、退出后复用和不带会话四项结果。",
+      "响应中的用户资料是合成内容；VC:L 代表潜在影响，真实数据影响和评分前提需复核。"
+    ],
+    "must_not_claim": [
+      "不得声称永久有效、无需凭证接管、已取得真实用户会话或其他失效方式也存在问题。"
+    ],
+    "evidence_gaps": [
+      "只验证退出后立即重放，没有测量会话继续有效的最长时间。",
+      "修改密码、管理员停用、跨设备和写操作未验证。"
+    ]
+  },
+  "reference_report": "session.reference.md"
+}

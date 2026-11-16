@@ -29,9 +29,13 @@ func IsFindingTrafficBindingEnabled() bool {
 // API contract. Disabled/unbound tools are never reintroduced here.
 func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.CoreTool, string) {
 	tools = append([]actool.CoreTool(nil), tools...)
+	reportGuidance := ""
 	for i, tool := range tools {
-		if tool.Name() == "update_finding_report" && !strings.Contains(tool.Description(), DeliveryReportSaveGuidance) {
-			tools[i] = DecorateTool(tool, tool.Description()+"\n"+DeliveryReportSaveGuidance, tool.InputSchema())
+		if tool.Name() == "update_finding_report" {
+			reportGuidance = DeliveryReportRuntimeGuidance + DeliveryReportChainGuidance + DeliveryReportEvidenceGuidance + DeliveryReportStyleGuidance
+			if !strings.Contains(tool.Description(), DeliveryReportSaveGuidance) {
+				tools[i] = DecorateTool(tool, tool.Description()+"\n"+DeliveryReportSaveGuidance, tool.InputSchema())
+			}
 		}
 	}
 	if !findingTrafficBindingEnabled() {
@@ -55,7 +59,10 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 			}
 			out = append(out, tool)
 		}
-		return out, ""
+		if reportGuidance != "" {
+			reportGuidance += findingIDGuidance
+		}
+		return out, reportGuidance
 	}
 	out := append([]actool.CoreTool(nil), tools...)
 	has := map[string]bool{}
@@ -74,9 +81,9 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 			out[i] = DecorateTool(tool, tool.Description()+note, tool.InputSchema())
 		}
 	}
-	guidance := ""
+	guidance := reportGuidance
 	if has["report_finding"] || has["add_task_hint"] || has["add_hint"] {
-		guidance = "\n\n**流量证据交接（可选）**：自动绑定默认由报告 Agent 在漏洞入库后、编写报告前完成。上报者应在 evidence 保留验证命令、关键输出、已有真实流量 ID 及其用途，任务中带 intent_id，便于报告 Agent 追溯；不必为了绑定额外查包。Auto / Planner 代为上报时不要丢弃执行者已有的引用。add_hint / add_task_hint 可用 traffic_refs 交接；显式即时绑定仍兼容 report_finding 的 traffic_refs / evidence_hint_id。TCP 或无包时正常登记，不能猜测 ID，也不能仅为补包重复探测。"
+		guidance += "\n\n**流量证据交接（可选）**：自动绑定默认由报告 Agent 在漏洞入库后、编写报告前完成。上报者应在 evidence 保留验证命令、关键输出、已有真实流量 ID 及其用途，任务中带 intent_id，便于报告 Agent 追溯；不必为了绑定额外查包。Auto / Planner 代为上报时不要丢弃执行者已有的引用。add_hint / add_task_hint 可用 traffic_refs 交接；显式即时绑定仍兼容 report_finding 的 traffic_refs / evidence_hint_id。TCP 或无包时正常登记，不能猜测 ID，也不能仅为补包重复探测。"
 		if has["add_task_hint"] && !has["add_hint"] {
 			guidance += "\n平台对话没有任务上下文时，不直接调用 report_finding；通过 add_task_hint 向已有对应任务交接，由任务 Agent 登记，并用 list_task_findings 核对结果。"
 		}
