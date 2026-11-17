@@ -114,6 +114,38 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptHashNeedsTemplateUpgrade(previousV24Hash) {
 		t.Fatal("previous v24 stock prompt would miss field budgets and de-duplication guidance")
 	}
+	const previousV25Hash = "f1850be22e070adce5879d7e6cf58e0afb6509fdc5892617751b97f700353ba9"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV25Hash) {
+		t.Fatal("previous v25 stock prompt would prevent supported behavior-based remediation proposals")
+	}
+	const previousV26Hash = "b444692a343f054ea0685828b3c1df90e3735d279972786fa87c053134a6502e"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV26Hash) {
+		t.Fatal("previous v26 stock prompt would permit synthetic-leak claims and multiple remediation alternatives")
+	}
+	const previousV27Hash = "26491cebbf5006c3a8d28bf29943b84bd395e3f3d55f60cffae114716be78867"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV27Hash) {
+		t.Fatal("previous v27 stock prompt would permit fabricated HTTP packets and conditional code fixes")
+	}
+	const previousV28Hash = "c9a7020f8405687afaaca33e30f5ed968ba68b9b2fa69b340685b85ead2e467b"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV28Hash) {
+		t.Fatal("previous v28 stock prompt would permit alternative fixes and omitted repeated requests")
+	}
+	const previousV29Hash = "16cc0718092b4ab57a5fd320ea70ef746da25d214e2e9ba048e13bcffca7266e"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV29Hash) {
+		t.Fatal("previous v29 stock prompt would permit multiple fix suggestions")
+	}
+	const previousV30Hash = "6922a24c94dcc6b2e4b1021163107aea7d3d87480fff40a79bee27a5211b5afd"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV30Hash) {
+		t.Fatal("previous v30 stock prompt would permit unsupported synthetic confidentiality claims")
+	}
+	const previousV31Hash = "1f5f062a02161d370dbfa89f260b2d1318941747ebc3d320a376bae4256ac086"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV31Hash) {
+		t.Fatal("previous v31 stock prompt would permit missing Burp packets and alternative fixes")
+	}
+	const previousV32Hash = "b5aa7ef16999d95655823f686c42d1eeec2e8782b0f3364209cb98fffe27e716"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV32Hash) {
+		t.Fatal("previous v32 stock prompt would permit synthetic confidentiality impact claims")
+	}
 	if reporterPromptNeedsTemplateUpgrade(agent.ReporterDefaultPrompt + "\n用户自定义要求。") {
 		t.Fatal("an edited v23 prompt must not be migrated over")
 	}

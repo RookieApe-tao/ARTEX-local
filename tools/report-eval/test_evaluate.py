@@ -402,6 +402,90 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertTrue(measured_incomplete["burp_request_packet_present"])
         self.assertIsNone(measured_incomplete["burp_request_packet_matches_evidence"])
 
+    def test_non_http_and_remediation_guardrail_metrics(self):
+        case = EVAL.cases_by_id()["non-http"]
+        report = "\n".join([
+            "# 本地文件权限问题",
+            "CVSS 4.0：" + case["facts"]["cvss_vector"],
+            "## 描述",
+            "读取到固定合成记录，未验证真实数据影响。",
+            "### 定级依据",
+            "向量中的影响是假设，实际影响待复核。",
+            "## 修复建议",
+            "将备份文件权限收紧至仅授权账号可读。",
+            "## 测试过程",
+            "测试时间：2026-11-01 10:00:00（北京时间）",
+            "### 发现过程与攻击思路",
+            "使用本地命令检查文件权限并读取样本。",
+            "### 失败尝试与未验证项",
+            "其他目录未检查。",
+            "### Burp 复现",
+            "Burp 不适用：本次通过本地命令验证。",
+            "## 攻击链路",
+            "```text",
+            "本地终端",
+            "└─ cat /tmp/report-eval/backups/customer-notes.txt",
+            "   └─ 读取到合成记录",
+            "```",
+            "## 证据说明",
+            "材料来自离线合成终端记录。",
+            "### 复测标准",
+            "仅授权账号可读取备份。",
+        ])
+        measured = EVAL.metrics(case, report)
+        self.assertTrue(measured["non_http_burp_not_applicable"])
+        self.assertFalse(measured["non_http_unexpected_http_request_packet"])
+        self.assertEqual(measured["remediation_alternative_terms_found"], [])
+        self.assertFalse(measured["remediation_conditional_fix_detected"])
+        self.assertEqual(measured["synthetic_confidentiality_claim_terms_found"], [])
+
+        fabricated_packet = report.replace(
+            "Burp 不适用：本次通过本地命令验证。",
+            "Burp 不适用。\n\n```http\nGET /fake HTTP/1.1\nHost: example.invalid\n```",
+        )
+        self.assertTrue(
+            EVAL.metrics(case, fabricated_packet)[
+                "non_http_unexpected_http_request_packet"
+            ]
+        )
+        alternative = report.replace(
+            "将备份文件权限收紧至仅授权账号可读。",
+            "若确认风险，则将权限设为 600 或 640。",
+        ).replace("读取到固定合成记录", "读取到合成样本泄露和敏感数据")
+        flagged = EVAL.metrics(case, alternative)
+        self.assertEqual(flagged["remediation_alternative_terms_found"], ["或"])
+        self.assertTrue(flagged["remediation_conditional_fix_detected"])
+        self.assertIn("敏感数据", flagged["synthetic_confidentiality_claim_terms_found"])
+        self.assertIn("合成样本泄露", flagged["synthetic_confidentiality_claim_terms_found"])
+
+        low_confidentiality_claim = report.replace(
+            "读取到固定合成记录", "低机密性影响"
+        )
+        self.assertIn(
+            "低机密性影响",
+            EVAL.metrics(case, low_confidentiality_claim)[
+                "synthetic_confidentiality_claim_terms_found"
+            ],
+        )
+        local_impact_claim = report.replace(
+            "读取到固定合成记录", "仅证实机密性局部影响"
+        )
+        self.assertIn(
+            "机密性局部影响",
+            EVAL.metrics(case, local_impact_claim)[
+                "synthetic_confidentiality_claim_terms_found"
+            ],
+        )
+        negated_claims = report.replace(
+            "读取到固定合成记录", "无实际响应内容支撑机密性受损结论"
+        )
+        self.assertEqual(
+            EVAL.metrics(case, negated_claims)[
+                "synthetic_confidentiality_claim_terms_found"
+            ],
+            [],
+        )
+
     def test_live_evaluation_only_accepts_loopback_and_renders_cvss_header(self):
         for url in ("https://example.com", "http://127.0.0.1.evil.test:8787", "http://user:placeholder@127.0.0.1:8787"):
             with self.subTest(url=url), self.assertRaises(ValueError):
