@@ -492,6 +492,233 @@ func ensureDeliveryBurpRequestFence(content string) string {
 	return strings.Join(formatted, "\n")
 }
 
+func ensureDeliveryBurpSection(content, evidencePacket, evidenceTransport string) string {
+	if evidenceTransport == "non-http" || evidenceTransport == "non_http" {
+		return ensureDeliveryNonHTTPBurpSection(content)
+	}
+
+	isHTTP := evidenceTransport == "http" || containsDeliveryHTTPRequest(evidencePacket) || containsDeliveryHTTPRequest(content)
+	if !isHTTP {
+		return content
+	}
+
+	if !strings.Contains(content, "### Burp 复现") {
+		lines := strings.Split(content, "\n")
+		insertAt := -1
+		for index, line := range lines {
+			trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+			if strings.Contains(trimmed, "Burp 不适用") {
+				lines[index] = "本次未在 Burp 中发送；以下为建议复测请求（未发送）："
+				insertAt = index
+				break
+			}
+		}
+		if insertAt < 0 {
+			if blockStart, _, ok := deliveryHTTPRequestBlockRange(content); ok {
+				insertAt = blockStart
+			}
+		}
+		if insertAt >= 0 {
+			lines = append(lines[:insertAt], append([]string{"### Burp 复现"}, lines[insertAt:]...)...)
+			content = strings.Join(lines, "\n")
+		} else {
+			content = strings.TrimSpace(content) + "\n\n### Burp 复现\n材料未记录是否实际在 Burp Repeater 中发送；以下为建议复测请求（未发送）。"
+		}
+	}
+
+	sectionStart, sectionEnd := deliveryBurpSectionRange(content)
+	if sectionStart < 0 {
+		return content
+	}
+	section := strings.Join(strings.Split(content, "\n")[sectionStart+1:sectionEnd], "\n")
+	if strings.Contains(section, "Burp 不适用") {
+		section = strings.ReplaceAll(section, "Burp 不适用", "本次未在 Burp 中发送；以下为建议复测请求（未发送）")
+		content = replaceDeliveryBurpSection(content, sectionStart, sectionEnd, section)
+		sectionStart, sectionEnd = deliveryBurpSectionRange(content)
+		section = strings.Join(strings.Split(content, "\n")[sectionStart+1:sectionEnd], "\n")
+	}
+	if !containsDeliveryHTTPRequest(section) {
+		packet := deliveryBurpEvidenceRequest(evidencePacket)
+		if packet == "" {
+			packet = "<METHOD> <PATH> HTTP/1.1\r\nHost: <需从授权账号重新捕获>"
+			section += "\n材料未记录完整请求字段；此模板不能直接发送，需从授权账号重新捕获。"
+		}
+		section += "\n```http\n" + packet + "\n```"
+		content = replaceDeliveryBurpSection(content, sectionStart, sectionEnd, section)
+	} else if !strings.Contains(section, "建议复测请求") && !strings.Contains(section, "本次使用 Burp") && !strings.Contains(section, "本次在 Burp") {
+		section = "材料未记录是否实际在 Burp Repeater 中发送；以下为建议复测请求（未发送）。\n" + strings.TrimSpace(section)
+		content = replaceDeliveryBurpSection(content, sectionStart, sectionEnd, section)
+	}
+	return ensureDeliveryBurpRequestFence(content)
+}
+
+func ensureDeliveryNonHTTPBurpSection(content string) string {
+	const body = "Burp 不适用：本次通过本地命令或终端记录验证。"
+	start, end := deliveryBurpSectionRange(content)
+	if start < 0 {
+		return strings.TrimSpace(content) + "\n\n### Burp 复现\n" + body
+	}
+	return replaceDeliveryBurpSection(content, start, end, body)
+}
+
+func ensureDeliveryDraftFailureHeading(content string) string {
+	const heading = "### 失败尝试与未验证项"
+	if strings.Contains(content, heading) {
+		return content
+	}
+	section := heading + "\n材料未记录失败尝试；需复核的未验证事项见复测标准。"
+	if index := strings.Index(content, "### Burp 复现"); index >= 0 {
+		return strings.TrimSpace(content[:index]) + "\n\n" + section + "\n\n" + strings.TrimSpace(content[index:])
+	}
+	return strings.TrimSpace(content) + "\n\n" + section
+}
+
+func deliveryBurpSectionRange(content string) (int, int) {
+	lines := strings.Split(content, "\n")
+	start, end := -1, len(lines)
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if start < 0 {
+			if trimmed == "### Burp 复现" {
+				start = index
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "### ") || strings.HasPrefix(trimmed, "## ") {
+			end = index
+			break
+		}
+	}
+	return start, end
+}
+
+func replaceDeliveryBurpSection(content string, start, end int, section string) string {
+	lines := strings.Split(content, "\n")
+	updated := append([]string{}, lines[:start+1]...)
+	updated = append(updated, strings.Split(strings.TrimSpace(section), "\n")...)
+	updated = append(updated, lines[end:]...)
+	return strings.Join(updated, "\n")
+}
+
+func containsDeliveryHTTPRequest(content string) bool {
+	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		if isDeliveryHTTPRequestLine(strings.TrimSpace(line)) {
+			return true
+		}
+	}
+	return false
+}
+
+func deliveryHTTPRequestBlockRange(content string) (int, int, bool) {
+	lines := strings.Split(content, "\n")
+	insideFence := false
+	fenceStart := -1
+	requestFound := false
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if strings.HasPrefix(trimmed, "```") {
+			if !insideFence {
+				insideFence = true
+				fenceStart = index
+				requestFound = false
+				continue
+			}
+			if requestFound {
+				return fenceStart, index + 1, true
+			}
+			insideFence = false
+			fenceStart = -1
+			continue
+		}
+		if isDeliveryHTTPRequestLine(trimmed) {
+			if insideFence {
+				requestFound = true
+			} else {
+				return index, index + 1, true
+			}
+		}
+	}
+	return -1, -1, false
+}
+
+func deliveryBurpEvidenceRequest(packet string) string {
+	lines := strings.Split(strings.ReplaceAll(packet, "\r\n", "\n"), "\n")
+	type candidate struct {
+		request string
+		proof   bool
+	}
+	var candidates []candidate
+	for index := 0; index < len(lines); {
+		start := index
+		proof := false
+		if isDeliveryEvidencePacketLabel(lines[index]) {
+			proof = strings.Contains(lines[index], "漏洞验证")
+			start++
+		}
+		end := start
+		for end < len(lines) && !isDeliveryEvidencePacketLabel(lines[end]) {
+			end++
+		}
+		requestStart := -1
+		for lineIndex := start; lineIndex < end; lineIndex++ {
+			if isDeliveryHTTPRequestLine(strings.TrimSpace(lines[lineIndex])) {
+				requestStart = lineIndex
+				break
+			}
+		}
+		if requestStart >= 0 {
+			requestEnd := deliveryRawHTTPRequestEnd(lines, requestStart, end)
+			request := strings.TrimSpace(strings.Join(lines[requestStart:requestEnd], "\r\n"))
+			request = redactDeliveryPacket(request)
+			request = normalizeDeliveryRequestContentLength(request)
+			candidates = append(candidates, candidate{request: request, proof: proof})
+		}
+		if end == len(lines) {
+			break
+		}
+		index = end
+	}
+	for _, item := range candidates {
+		if item.proof {
+			return item.request
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0].request
+	}
+	return ""
+}
+
+func isDeliveryEvidencePacketLabel(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "证据绑定 ") ||
+		(strings.HasPrefix(trimmed, "### ") && strings.HasSuffix(trimmed, "· 请求"))
+}
+
+func normalizeDeliveryRequestContentLength(packet string) string {
+	separator := "\r\n\r\n"
+	index := strings.Index(packet, separator)
+	if index < 0 {
+		separator = "\n\n"
+		index = strings.Index(packet, separator)
+	}
+	if index < 0 {
+		return packet
+	}
+	head, body := packet[:index], packet[index+len(separator):]
+	lines := strings.Split(head, "\r\n")
+	if len(lines) == 1 {
+		lines = strings.Split(head, "\n")
+	}
+	for lineIndex, line := range lines {
+		name, _, ok := strings.Cut(line, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
+			lines[lineIndex] = name + ": " + strconv.Itoa(len([]byte(body)))
+		}
+	}
+	return strings.Join(lines, "\r\n") + separator + body
+}
+
 func isDeliveryHTTPRequestLine(line string) bool {
 	fields := strings.Fields(line)
 	return len(fields) == 3 && fields[0] != "" && fields[1] != "" && strings.HasPrefix(strings.ToUpper(fields[2]), "HTTP/")
@@ -583,7 +810,12 @@ func normalizeDeliveryDraftSubheadings(content string, headings ...string) strin
 				position = offset + index
 				return
 			}
-			for _, label := range []string{heading + "：", heading + ":"} {
+			labels := []string{heading + "：", heading + ":"}
+			compactHeading := strings.ReplaceAll(heading, " ", "")
+			if compactHeading != heading {
+				labels = append(labels, compactHeading+"：", compactHeading+":")
+			}
+			for _, label := range labels {
 				if index = strings.Index(line, label); index >= 0 {
 					position = offset + index
 					plainLabel = label
@@ -617,6 +849,24 @@ func normalizeDeliveryDraftSubheadings(content string, headings ...string) strin
 		}
 	}
 	return strings.TrimSpace(content)
+}
+
+func ensureDeliveryDraftDiscoveryHeading(content string) string {
+	const heading = "### 发现过程与攻击思路"
+	if strings.Contains(content, heading) {
+		return content
+	}
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	insertAt := 0
+	for index, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(strings.TrimSuffix(line, "\r")), "测试时间：") {
+			insertAt = index + 1
+			break
+		}
+	}
+	section := []string{"", heading, ""}
+	lines = append(lines[:insertAt], append(section, lines[insertAt:]...)...)
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func ensureDeliveryAttackChainTextFence(content string) string {
@@ -1198,6 +1448,10 @@ func parseDeliveryReportDraft(
 	}
 	draft.Description = normalizeDeliveryDraftSubheadings(draft.Description, "定级依据")
 	draft.TestProcess = normalizeDeliveryDraftSubheadings(draft.TestProcess, "发现过程与攻击思路", "失败尝试与未验证项", "Burp 复现")
+	draft.TestProcess = ensureDeliveryDraftDiscoveryHeading(draft.TestProcess)
+	draft.TestProcess = ensureDeliveryBurpSection(draft.TestProcess, input["request_packet"], input["evidence_transport"])
+	draft.TestProcess = ensureDeliveryDraftFailureHeading(draft.TestProcess)
+	draft.TestProcess = ensureDeliveryBurpRequestFence(draft.TestProcess)
 	draft.DiscoveryPath = normalizeDeliveryDraftSubheadings(draft.DiscoveryPath, "复测标准")
 	draft.Description = stripDeliveryDraftSectionHeading(draft.Description, "描述")
 	draft.Remediation = stripDeliveryDraftSectionHeading(draft.Remediation, "修复建议")
@@ -1206,7 +1460,6 @@ func parseDeliveryReportDraft(
 	draft.Description = stripRedundantDeliveryDraftSubheading(draft.Description, "描述")
 	draft.Remediation = stripRedundantDeliveryDraftSubheading(draft.Remediation, "修复建议")
 	draft.TestProcess = stripRedundantDeliveryDraftSubheading(draft.TestProcess, "测试过程")
-	draft.TestProcess = ensureDeliveryBurpRequestFence(draft.TestProcess)
 	draft.AttackChain = stripDeliveryDraftSectionHeading(draft.AttackChain, "攻击链路")
 	draft.AttackChain = stripRedundantDeliveryDraftSubheading(draft.AttackChain, "攻击链路")
 	draft.AttackChain = ensureDeliveryAttackChainTextFenceWithEvidence(

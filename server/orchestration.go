@@ -622,6 +622,14 @@ func (s *Server) seedOrchestrationTools() {
 	s.upgradeReporterDeliveryTemplateV23() // 改善 Burp 请求包、报告术语和攻击链可读性
 	s.upgradeReporterDeliveryTemplateV24() // 要求所有 HTTP 报告附 Burp 请求包
 	s.upgradeReporterDeliveryTemplateV25() // 为交付报告增加字段篇幅预算与去重要求
+	s.upgradeReporterDeliveryTemplateV26() // 区分根因证据与有依据的行为修复建议
+	s.upgradeReporterDeliveryTemplateV27() // 禁止合成内容误报泄露并收敛为单一修复措施
+	s.upgradeReporterDeliveryTemplateV28() // 禁止非 HTTP 请求包与未经确认的条件式修复结论
+	s.upgradeReporterDeliveryTemplateV29() // 收敛常见修复措施并核对每次请求结果
+	s.upgradeReporterDeliveryTemplateV30() // 固定常见单项修复并补齐发现过程标题
+	s.upgradeReporterDeliveryTemplateV31() // 明确合成数据的潜在机密性影响表述
+	s.upgradeReporterDeliveryTemplateV32() // 确保 HTTP 报告含 Burp 请求并收敛修复措施
+	s.upgradeReporterDeliveryTemplateV33() // 禁止把合成材料写成已发生的机密性影响
 	s.upgradeReporterTriggerMessage()      // 老库触发消息同步报告版式与链路图规范
 	s.upgradeReporterTriggerMessageV11()   // 移除触发消息中重复的报告写作规则
 	s.seedFindingTrafficTools()            // 增加可选证据参数及只读证据工具，保留用户配置
@@ -799,6 +807,22 @@ func reporterPromptHashNeedsTemplateUpgrade(hash string) bool {
 		"54343d87df0ffdff1aeec0d3e58dd3bd23b7fb138884bc8719cc01ca5e85fe63": // v23 Burp 请求包与可读性默认提示词
 		return true
 	case "506d290c34bc78e4d52d1665b5e740466a379fe803b4cff2e3dc2efca090e371": // v24 必需请求包默认提示词
+		return true
+	case "f1850be22e070adce5879d7e6cf58e0afb6509fdc5892617751b97f700353ba9": // v25 篇幅预算与修复边界默认提示词
+		return true
+	case "b444692a343f054ea0685828b3c1df90e3735d279972786fa87c053134a6502e": // v26 根因与行为修复边界默认提示词
+		return true
+	case "26491cebbf5006c3a8d28bf29943b84bd395e3f3d55f60cffae114716be78867": // v27 合成影响与修复措施约束默认提示词
+		return true
+	case "c9a7020f8405687afaaca33e30f5ed968ba68b9b2fa69b340685b85ead2e467b": // v28 非 HTTP 与证据不足边界默认提示词
+		return true
+	case "16cc0718092b4ab57a5fd320ea70ef746da25d214e2e9ba048e13bcffca7266e": // v29 单项修复与请求覆盖默认提示词
+		return true
+	case "6922a24c94dcc6b2e4b1021163107aea7d3d87480fff40a79bee27a5211b5afd": // v30 合成数据机密性表述默认提示词
+		return true
+	case "1f5f062a02161d370dbfa89f260b2d1318941747ebc3d320a376bae4256ac086": // v31 修复措施与合成影响默认提示词
+		return true
+	case "b5aa7ef16999d95655823f686c42d1eeec2e8782b0f3364209cb98fffe27e716": // v32 Burp 请求与单项修复默认提示词
 		return true
 	default:
 		return false
@@ -1127,6 +1151,270 @@ func (s *Server) upgradeReporterDeliveryTemplateV25() {
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存正文篇幅预算迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV26() {
+	const flag = "reporter_prompt_delivery_template_v26"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取行为修复建议迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新行为修复建议提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已同步根因与行为修复边界")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存行为修复建议迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV27() {
+	const flag = "reporter_prompt_delivery_template_v27"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取合成材料与单一修复措施迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新合成材料与单一修复措施提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已禁止将合成样本描述为真实泄露，并要求单一修复措施")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存合成材料与单一修复措施迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV28() {
+	const flag = "reporter_prompt_delivery_template_v28"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取非 HTTP 与证据不足迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新非 HTTP 与证据不足提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已禁止非 HTTP 场景虚构请求，并收紧证据不足时的修复建议")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存非 HTTP 与证据不足迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV29() {
+	const flag = "reporter_prompt_delivery_template_v29"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取修复措施与请求覆盖迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新修复措施与请求覆盖提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已明确单一修复措施并要求逐条核对重复请求")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存修复措施与请求覆盖迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV30() {
+	const flag = "reporter_prompt_delivery_template_v30"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取单项修复建议迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新单项修复建议提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已固定常见修复措施并强化报告结构检查")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存单项修复建议迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV31() {
+	const flag = "reporter_prompt_delivery_template_v31"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取合成数据影响表述迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新合成数据影响表述提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已区分合成数据与潜在机密性影响")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存合成数据影响表述迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV32() {
+	const flag = "reporter_prompt_delivery_template_v32"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取 Burp 请求与修复措施迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新 Burp 请求与单项修复提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已补齐 Burp 请求并收敛修复措施")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存 Burp 请求与修复措施迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV33() {
+	const flag = "reporter_prompt_delivery_template_v33"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取合成机密性边界迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新合成机密性边界提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已限定合成材料的机密性结论")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存合成机密性边界迁移标记失败: %v", err)
 	}
 }
 

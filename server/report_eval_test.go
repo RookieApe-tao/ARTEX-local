@@ -333,8 +333,20 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"动笔前先从原始请求/响应、命令输出和执行记录整理事实",
 		"根因（只有源码、配置或日志能证明时才填写，否则记为未知）",
 		"不得称为真实用户资料、敏感数据或实际泄露",
-		"行为尚未确认时只列补证步骤",
+		"禁止声称发生任何真实数据泄露或机密性影响",
+		"不得把样本内容本身称为“合成样本泄露”",
+		"不得把 VC:L 描述成已确认、已证实、已观察到或局部发生的机密性影响",
+		"VC:L 为待复核的潜在影响假设，真实数据影响未验证",
+		"SQL 参数改变查询逻辑时只写“使用参数化查询”",
+		"不得把预编译语句等同义实现并列为选项",
+		"不得把删除服务端会话记录列为另一种措施",
+		"缺陷行为未确认时只列补证步骤",
+		"只有本地命令或终端证据、没有 HTTP 请求记录时",
 		"修复建议只写一项与已确认行为相符的主要措施",
+		"第二种措施与不同权限值均不得出现",
+		"缺陷行为未确认时只列补证步骤，不给条件式代码修复建议",
+		"相同业务编号重复创建时建议建立数据库唯一约束",
+		"同一路径重复出现时，每一次都必须在攻击链独立成节点",
 		"合成样本不能直接发往真实目标，也不能要求把样本值替换成真实凭据",
 		"建议复测请求（未发送）",
 		"所有 HTTP 报告都必须有 Burp Repeater 小节和至少一段足以复测核心结论的 HTTP 请求包，与 Burp 是否实际使用无关",
@@ -356,6 +368,156 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 	}
 	if strings.Count(prompt, agent.DeliveryReportDraftRules) != 1 || strings.Contains(prompt, agent.DeliveryReportWritingRules) {
 		t.Fatal("compatibility draft generation must use only its dedicated draft rules")
+	}
+}
+
+func TestDeliveryReportDraftRestoresBurpSectionAndRedactsEvidencePacket(t *testing.T) {
+	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
+	message, err := json.Marshal(deliveryReportDraft{
+		CVSSVector:  vector,
+		Description: "普通用户可修改作业。\n### 定级依据\n观察到完整性变化。",
+		Remediation: "在修改接口校验作业归属。",
+		TestProcess: strings.Join([]string{
+			"### 发现过程与攻击思路",
+			"按步骤重放请求。",
+			"Burp 不适用：本次仅基于离线合成材料。",
+			"```http",
+			"POST /api/jobs/job-a/types HTTP/1.1",
+			"Host: report-eval.invalid",
+			"Content-Type: application/json",
+			"",
+			`{"selectedTypes":["name"]}`,
+			"```",
+		}, "\n"),
+		AttackChain:   "验证请求组\n├─ 主流程\n│  └─ POST /api/jobs/job-a/types\n│     └─ 配置发生变化",
+		DiscoveryPath: "材料来自离线合成样本。\n### 复测标准\n非所有者提交后配置保持不变。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := parseDeliveryReportDraft(llm.Message{Content: []llm.ContentBlock{llm.TextBlock(string(message))}}, "end_turn", llm.Usage{}, map[string]string{
+		"evidence_transport": "http",
+		"request_packet":     "证据绑定 1（漏洞验证）\nPOST /api/jobs/job-a/types HTTP/1.1\r\nHost: report-eval.invalid\r\nAuthorization: Bearer session-secret\r\nCookie: sid=cookie-secret\r\nContent-Type: application/json\r\nContent-Length: 18\r\n\r\n{\"token\":\"secret\"}",
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := draft.TestProcess
+	burpStart, burpEnd := deliveryBurpSectionRange(process)
+	if burpStart < 0 || burpEnd <= burpStart {
+		t.Fatalf("HTTP report is missing its Burp subsection: %s", process)
+	}
+	if !strings.Contains(process, "### 失败尝试与未验证项") || strings.Index(process, "### 失败尝试与未验证项") > strings.Index(process, "### Burp 复现") {
+		t.Fatalf("required test subsections are missing or out of order: %s", process)
+	}
+	burpSection := strings.Join(strings.Split(process, "\n")[burpStart+1:burpEnd], "\n")
+	if !strings.Contains(burpSection, "本次未在 Burp 中发送") || !strings.Contains(burpSection, "POST /api/jobs/job-a/types HTTP/1.1") {
+		t.Fatalf("Burp guidance or the request packet is missing: %s", burpSection)
+	}
+	if strings.Contains(burpSection, "Burp 不适用") {
+		t.Fatalf("HTTP report was incorrectly marked not applicable: %s", burpSection)
+	}
+	if strings.Contains(burpSection, "session-secret") || strings.Contains(burpSection, "cookie-secret") || strings.Contains(burpSection, `"secret"`) {
+		t.Fatalf("sensitive values leaked into the Burp request packet: %s", burpSection)
+	}
+}
+
+func TestDeliveryReportDraftAddsEvidenceRequestWhenModelOmitsPacket(t *testing.T) {
+	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
+	message, err := json.Marshal(deliveryReportDraft{
+		CVSSVector:    vector,
+		Description:   "问题已观察。\n### 定级依据\n证据说明完整性影响。",
+		Remediation:   "校验资源归属。",
+		TestProcess:   "### 发现过程与攻击思路\n按步骤核对请求。\n### 失败尝试与未验证项\n没有其他失败记录。",
+		AttackChain:   "验证请求\n└─ POST /api/jobs/job-a/types\n   └─ 修改成功",
+		DiscoveryPath: "材料来自绑定请求。\n### 复测标准\n非所有者请求被拒绝。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceRequest := "证据绑定 1（测试基线）\nGET /api/jobs/job-a HTTP/1.1\r\nHost: report-eval.invalid\r\nContent-Length: 0\r\n\r\n\n\n证据绑定 2（漏洞验证）\nPOST /api/jobs/job-a/types?access_token=query-secret HTTP/1.1\r\nHost: report-eval.invalid\r\nAuthorization: Bearer session-secret\r\nCookie: sid=cookie-secret\r\nContent-Type: application/json\r\nContent-Length: 18\r\n\r\n{\"token\":\"secret\"}"
+	draft, err := parseDeliveryReportDraft(llm.Message{Content: []llm.ContentBlock{llm.TextBlock(string(message))}}, "end_turn", llm.Usage{}, map[string]string{
+		"evidence_transport": "http",
+		"request_packet":     evidenceRequest,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	burpStart, burpEnd := deliveryBurpSectionRange(draft.TestProcess)
+	if burpStart < 0 || burpEnd <= burpStart {
+		t.Fatalf("HTTP report is missing its Burp subsection: %s", draft.TestProcess)
+	}
+	burpSection := strings.Join(strings.Split(draft.TestProcess, "\n")[burpStart+1:burpEnd], "\n")
+	for _, expected := range []string{
+		"建议复测请求（未发送）",
+		"POST /api/jobs/job-a/types?access_token=%5BREDACTED%5D HTTP/1.1",
+		"Authorization: [REDACTED]",
+		"Cookie: [REDACTED]",
+		`"token":"[REDACTED]"`,
+		"Content-Length: 22",
+	} {
+		if !strings.Contains(burpSection, expected) {
+			t.Fatalf("Burp subsection is missing %q: %s", expected, burpSection)
+		}
+	}
+	for _, secret := range []string{"query-secret", "session-secret", "cookie-secret", `"secret"`} {
+		if strings.Contains(burpSection, secret) {
+			t.Fatalf("Burp packet leaked %q: %s", secret, burpSection)
+		}
+	}
+}
+
+func TestDeliveryBurpEvidenceRequestKeepsEvalPacketsSeparate(t *testing.T) {
+	packet := strings.Join([]string{
+		"### 修改前查询 · 请求",
+		"GET /api/jobs/job-a HTTP/1.1",
+		"Host: report-eval.invalid",
+		"",
+		"",
+		"### 漏洞验证：其他用户提交修改 · 请求",
+		"POST /api/jobs/job-a/types HTTP/1.1",
+		"Host: report-eval.invalid",
+		"Content-Type: application/json",
+		"Content-Length: 18",
+		"",
+		`{"token":"secret"}`,
+		"",
+		"",
+		"### 修改后查询 · 请求",
+		"GET /api/jobs/job-a HTTP/1.1",
+		"Host: report-eval.invalid",
+	}, "\n")
+
+	got := deliveryBurpEvidenceRequest(packet)
+	if !strings.HasPrefix(got, "POST /api/jobs/job-a/types HTTP/1.1\r\n") {
+		t.Fatalf("expected the proof request, got %q", got)
+	}
+	if strings.Contains(got, "GET /api/jobs/job-a HTTP/1.1") || strings.Contains(got, "### 修改后查询") {
+		t.Fatalf("extracted request contains neighboring evidence: %q", got)
+	}
+	if strings.Contains(got, `"secret"`) || !strings.Contains(got, `"token":"[REDACTED]"`) {
+		t.Fatalf("extracted request was not redacted: %q", got)
+	}
+}
+
+func TestDeliveryNonHTTPBurpSectionRemovesFabricatedRequest(t *testing.T) {
+	content := strings.Join([]string{
+		"### 发现过程与攻击思路",
+		"使用本地命令读取样本。",
+		"### Burp 复现",
+		"Burp 不适用。",
+		"```http",
+		"GET /fabricated HTTP/1.1",
+		"Host: example.invalid",
+		"```",
+	}, "\n")
+
+	got := ensureDeliveryBurpSection(content, "", "non_http")
+	if !strings.Contains(got, "Burp 不适用：本次通过本地命令或终端记录验证。") {
+		t.Fatalf("non-HTTP report is missing the required boundary: %s", got)
+	}
+	if strings.Contains(got, "```http") || strings.Contains(got, "/fabricated") {
+		t.Fatalf("non-HTTP Burp section retained a fabricated HTTP request: %s", got)
 	}
 }
 
@@ -444,6 +606,14 @@ func TestDeliveryReportDraftMovesRequiredSubheadingsToOwnLines(t *testing.T) {
 	joinedHeading := normalizeDeliveryDraftSubheadings("结果。### 定级依据影响已观察。", "定级依据")
 	if !strings.Contains(joinedHeading, "\n### 定级依据\n影响已观察。") {
 		t.Fatalf("heading joined directly to prose was not normalized: %q", joinedHeading)
+	}
+	compactBurpHeading := normalizeDeliveryDraftSubheadings("请求未实际发送。Burp复现：建议在授权环境重放。", "Burp 复现")
+	if !strings.Contains(compactBurpHeading, "\n### Burp 复现\n建议在授权环境重放。") {
+		t.Fatalf("compact Burp label was not normalized to the fixed heading: %q", compactBurpHeading)
+	}
+	missingDiscoveryHeading := ensureDeliveryDraftDiscoveryHeading("测试时间：2026-11-01 10:00:00（北京时间）\n1. 执行基线查询。")
+	if !strings.Contains(missingDiscoveryHeading, "测试时间：2026-11-01 10:00:00（北京时间）\n\n### 发现过程与攻击思路\n\n1. 执行基线查询。") {
+		t.Fatalf("missing discovery heading was not inserted after the test time: %q", missingDiscoveryHeading)
 	}
 	report := strings.Join([]string{
 		"# 测试系统 作业越权",

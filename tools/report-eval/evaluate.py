@@ -512,6 +512,41 @@ def markdown_parts(report):
     return "\n".join(narrative), code_blocks, fence is None
 
 
+def has_unnegated_phrase(text, phrase):
+    negative_context = (
+        "未验证",
+        "未确认",
+        "未证实",
+        "未观察到",
+        "未发生",
+        "未能确认",
+        "无法确认",
+        "无法验证",
+        "无法证实",
+        "不支持",
+        "不代表",
+        "不成立",
+        "没有证据",
+        "无证据",
+        "缺少证据",
+        "缺乏证据",
+        "尚未",
+        "待复核",
+        "无实际响应内容支撑",
+    )
+    offset = 0
+    while (start := text.find(phrase, offset)) >= 0:
+        end = start + len(phrase)
+        before = text[max(0, start - 36) : start]
+        after = text[end : end + 20]
+        if not any(marker in before for marker in negative_context) and not any(
+            after.startswith(marker) for marker in negative_context
+        ):
+            return True
+        offset = end
+    return False
+
+
 def metrics(case, report):
     narrative, blocks, closed = markdown_parts(report)
     normalized = report.replace("\r\n", "\n")
@@ -565,6 +600,39 @@ def metrics(case, report):
     burp_request_blocks = re.findall(r"(?ms)^```http\s*\n(.*?)^```\s*$", burp_text)
     burp_request_packet_present = bool(burp_request_packet_lines)
     is_http_case = case["kind"] == "http"
+    is_non_http_case = case["kind"] == "non_http"
+    non_http_burp_not_applicable = is_non_http_case and "Burp 不适用" in burp_text
+    non_http_unexpected_http_request_packet = is_non_http_case and burp_request_packet_present
+    remediation_match = re.search(
+        r"(?ms)^## 修复建议\s*\n(.*?)(?=^## |\Z)", report_body
+    )
+    remediation_text = remediation_match.group(1) if remediation_match else ""
+    remediation_alternative_terms_found = [
+        term for term in ("或", "也可", "之一") if term in remediation_text
+    ]
+    remediation_conditional_fix_detected = bool(
+        re.search(r"(?:若|如|如果)确认|确认后(?:应|需|要|可)", remediation_text)
+    )
+    synthetic_confidentiality_claim_terms_found = (
+        [
+            term
+            for term in (
+                "敏感数据",
+                "合成样本泄露",
+                "机密性轻微泄露",
+                "低危机密性影响",
+                "低机密性影响",
+                "机密性局部影响",
+                "已证实机密性影响",
+                "已确认机密性影响",
+                "已观察到机密性影响",
+                "机密性受损",
+            )
+            if has_unnegated_phrase(report_body, term)
+        ]
+        if case.get("synthetic")
+        else []
+    )
     has_http_request_evidence = is_http_case and any(
         item.get("request") for item in case["evidence"]
     )
@@ -769,6 +837,17 @@ def metrics(case, report):
             burp_request_packet_matches_evidence
             if has_http_request_evidence
             else None
+        ),
+        "non_http_burp_not_applicable": (
+            non_http_burp_not_applicable if is_non_http_case else None
+        ),
+        "non_http_unexpected_http_request_packet": (
+            non_http_unexpected_http_request_packet if is_non_http_case else None
+        ),
+        "remediation_alternative_terms_found": remediation_alternative_terms_found,
+        "remediation_conditional_fix_detected": remediation_conditional_fix_detected,
+        "synthetic_confidentiality_claim_terms_found": (
+            synthetic_confidentiality_claim_terms_found
         ),
         "burp_request_identity_headers_match_evidence": (
             burp_identity_headers_match_evidence
