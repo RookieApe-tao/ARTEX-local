@@ -289,6 +289,7 @@ class ReportEvaluationTest(unittest.TestCase):
         measured = EVAL.metrics(case, EVAL.attach_evidence(case, report))
         self.assertTrue(measured["burp_request_packet_required"])
         self.assertFalse(measured["burp_request_packet_present"])
+        self.assertFalse(measured["burp_request_packet_matches_evidence"])
         self.assertEqual(
             measured["unclear_report_shorthand_found"],
             ["状态码/响应字节数连写", "内部变量名和值连写"],
@@ -298,14 +299,23 @@ class ReportEvaluationTest(unittest.TestCase):
             "本次未在 Burp 中发送，见建议步骤。",
             "本次未在 Burp 中发送。建议复测请求（未发送）：\n\n"
             "```http\nGET /api/jobs/job-a HTTP/1.1\n"
-            "Host: <授权目标域名>\nAuthorization: <重新登录后捕获的会话>\n```",
+            "Host: report-eval.invalid\nX-Eval-Actor: user-a\n```",
         )
         with_packet = with_packet.replace("返回 200/1382B，held=alice", "作业信息可读取")
         measured_with_packet = EVAL.metrics(
             case, EVAL.attach_evidence(case, with_packet)
         )
         self.assertTrue(measured_with_packet["burp_request_packet_present"])
+        self.assertTrue(measured_with_packet["burp_request_packet_matches_evidence"])
         self.assertFalse(measured_with_packet["unclear_report_shorthand_found"])
+
+        mismatched_packet = with_packet.replace(
+            "GET /api/jobs/job-a HTTP/1.1", "GET /api/jobs/job-b HTTP/1.1"
+        )
+        measured_mismatch = EVAL.metrics(
+            case, EVAL.attach_evidence(case, mismatched_packet)
+        )
+        self.assertFalse(measured_mismatch["burp_request_packet_matches_evidence"])
 
     def test_live_evaluation_only_accepts_loopback_and_renders_cvss_header(self):
         for url in ("https://example.com", "http://127.0.0.1.evil.test:8787", "http://user:placeholder@127.0.0.1:8787"):

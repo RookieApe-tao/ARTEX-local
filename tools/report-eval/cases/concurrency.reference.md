@@ -16,13 +16,14 @@ CVSS 4.0：CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N  评�
 ### 失败尝试与未验证项
 缺少 `reference` 的提交返回 400。串行重复提交、其他账号和更大并发量未测；没有请求级时间，不能确认服务端同时处理。
 ### Burp 复现
-本次未使用 Burp Repeater。它可逐条核对重复处理，不能复现并发；并发修复应使用同步并发驱动复测。以下为单次请求模板，未发送：
+本次未使用 Burp Repeater。以下请求来自离线合成样本，未发送；`report-eval.invalid` 和 `X-Eval-Actor` 是样本值，不能替换后发往真实目标。它可逐条核对重复处理，不能复现并发；并发修复应使用同步并发驱动复测：
 
 ```http
 POST /api/registrations HTTP/1.1
-Host: <授权目标域名>
-Authorization: <由授权账号正常登录后捕获>
+Host: report-eval.invalid
+X-Eval-Actor: user-a
 Content-Type: application/json
+Content-Length: 25
 
 {"reference":"EVAL-RACE"}
 ```

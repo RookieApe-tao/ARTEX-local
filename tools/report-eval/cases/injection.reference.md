@@ -16,12 +16,13 @@ CVSS 4.0：CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N  评�
 ### 失败尝试与未验证项
 UNION 请求返回 400，未取得额外数据。字段值读取、数据库版本、表结构、写入和命令执行未验证。
 ### Burp 复现
-本次结果来自离线合成报文，未在 Burp Repeater 中复测。授权环境中正常登录后捕获请求，只修改 `name` 并比较结果。以下是真条件请求模板，未发送：
+本次结果来自离线合成报文，未在 Burp Repeater 中复测。以下是真条件请求，来自离线合成样本且未发送；`report-eval.invalid` 和 `X-Eval-Actor` 是样本值，不能替换后发往真实目标：
 
 ```http
 GET /api/products?name=alpha%27%20AND%201%3D1--%20 HTTP/1.1
-Host: <授权目标域名>
-Authorization: <由授权账号正常登录后捕获>
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Length: 0
 ```
 
 ## 攻击链路

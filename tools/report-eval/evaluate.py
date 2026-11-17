@@ -39,7 +39,9 @@ UNCLEAR_REPORT_TERMS = (
     "阴性对照",
     "sha256_16",
 )
-HTTP_REQUEST_LINE = re.compile(r"(?mi)^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S+\s+HTTP/\d(?:\.\d)?\s*$")
+HTTP_REQUEST_LINE = re.compile(
+    r"(?mi)^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)[ \t]+\S+[ \t]+HTTP/\d(?:\.\d)?[ \t]*\r?$"
+)
 STATUS_LENGTH_SHORTHAND = re.compile(r"\b\d{3}\s*/\s*\d+\s*[Bb]\b")
 INTERNAL_VALUE_SHORTHAND = re.compile(r"\b(?:held|readOnly|message|payload|sha256(?:_\d+)?)\s*=")
 INSTRUCTION = (
@@ -549,12 +551,22 @@ def metrics(case, report):
         r"(?ms)^### Burp 复现\s*\n(.*?)(?=^### |^## |\Z)", report_body
     )
     burp_text = burp_match.group(1) if burp_match else ""
-    burp_request_packet_present = any(
-        HTTP_REQUEST_LINE.search(block)
+    burp_request_packet_lines = [
+        match.group(0).strip()
         for block in re.findall(r"(?ms)^```http\s*\n(.*?)^```\s*$", burp_text)
-    )
+        for match in HTTP_REQUEST_LINE.finditer(block)
+    ]
+    burp_request_packet_present = bool(burp_request_packet_lines)
     has_http_request_evidence = case["kind"] == "http" and any(
         item.get("request") for item in case["evidence"]
+    )
+    evidence_request_lines = {
+        match.group(0).strip()
+        for item in case["evidence"]
+        for match in HTTP_REQUEST_LINE.finditer(item.get("request", ""))
+    }
+    burp_request_packet_matches_evidence = bool(burp_request_packet_lines) and all(
+        line in evidence_request_lines for line in burp_request_packet_lines
     )
     unclear_report_shorthand_found = [
         term for term in UNCLEAR_REPORT_TERMS if term in report_body
@@ -689,6 +701,11 @@ def metrics(case, report):
         "burp_request_packet_required": has_http_request_evidence,
         "burp_request_packet_present": (
             burp_request_packet_present if has_http_request_evidence else None
+        ),
+        "burp_request_packet_matches_evidence": (
+            burp_request_packet_matches_evidence
+            if has_http_request_evidence
+            else None
         ),
         "unclear_report_shorthand_found": unclear_report_shorthand_found,
         "semantic_quality": "未自动判定；原文匹配和字数不能证明结论正确或文字易读",
