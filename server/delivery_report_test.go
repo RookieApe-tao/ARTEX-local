@@ -446,26 +446,11 @@ VALUES(?,?,?,?,?)`, id, requestHead, responseHead, []byte(requestBody), []byte(r
 func deliveryReportFixture(description, vector string) string {
 	return fmt.Sprintf(`# 测试系统-模块 /test 测试缺陷：测试结果
 
-CVSS 4.0：%s  评分 待计算（待计算）
+CVSS 4.0：%s  评分待复核
 
 ## 描述
 
 %s
-### 定级依据
-现有证据只支持当前已观察到的影响，其他影响未验证。
-
-## 修复建议
-
-现有材料不足以定位具体实现，需结合源码确认修复位置。
-
-## 测试过程
-
-### 发现过程与攻击思路
-材料没有提供可复现的请求或命令，具体步骤未验证。
-### 失败尝试与未验证项
-实际影响未验证；没有记录的操作不补写为失败尝试。
-### Burp 复现
-协议未确认，Burp Repeater 复测未验证。
 
 ## 攻击链路
 
@@ -474,11 +459,24 @@ CVSS 4.0：%s  评分 待计算（待计算）
 └─ 请求结果和业务影响未验证
 ~~~
 
-## 证据说明
+## 测试过程
 
-来源为本地合成测试记录，未采集原始请求和响应。
-### 复测标准
-取得完整请求与响应后，按授权账号复现，并核对实际业务数据变化。`, vector, description)
+测试时间：未记录
+
+操作、失败尝试和影响边界未记录。
+
+## Burp 复现
+
+以下请求包供渗透测试工程师在授权目标中导入 Burp Repeater 复现或复测；请求包本身不代表已发送或验证。
+
+~~~http
+GET /test HTTP/1.1
+Host: <需从授权账号重新捕获>
+~~~
+
+## 修复建议
+
+现有材料不足以定位具体实现，需结合源码确认修复位置。`, vector, description)
 }
 
 func deliveryPacketFixture(t *testing.T, store *evidence.Store, requestHead, requestBody, responseHead, responseBody string) db.TrafficEvidenceSnapshot {

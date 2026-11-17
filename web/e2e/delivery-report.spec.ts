@@ -58,29 +58,27 @@ test("finding detail shows its paired delivery report with AI CVSS and copy", as
   await context.addInitScript(() => localStorage.setItem("artex_token", "delivery-report-e2e"));
 
   const reportText = [
-    "# 漏洞名称：权限校验缺失",
+    "# 权限校验缺失",
     "",
     `- **CVSS 4.0 Base 向量（CVSS-B）**：${officialVectors[0].vector}`,
     "- **CVSS 4.0 评分**：1.0（CVSS-B）",
     "- **漏洞等级**：低危",
     "",
-    "## 漏洞描述",
+    "## 描述",
     "接口未校验当前用户是否拥有目标记录的访问权限。",
     "",
-    "## 修复建议",
-    "在读取记录前校验当前用户是否有权访问该记录。",
+    "## 攻击链路",
+    "```text\n普通用户访问记录接口\n└─ GET /api/records/42\n   └─ 返回其他用户的记录\n```",
     "",
     "## 测试过程",
-    "通过 API 直接请求目标记录接口，确认未授权的记录编号仍被接受。",
+    "测试时间：未记录\n通过 API 请求目标记录接口，响应返回其他用户的记录。",
     "",
-    "## 攻击链路",
-    "POST /api/records/{id}\n└── 服务端未校验记录归属\n    └── 返回目标记录",
+    "## Burp 复现",
+    "以下请求包供渗透测试工程师在授权目标中导入 Burp Repeater 复现或复测；请求包本身不代表已通过 Burp 发送或验证。",
+    "```http\nGET /api/records/42 HTTP/1.1\nHost: app.example\n```",
     "",
-    "## Burp 复测请求",
-    "```http\nPOST /api/records/42 HTTP/1.1\nHost: app.example\n```",
-    "",
-    "## 返回包",
-    '```http\nHTTP/1.1 200 OK\nContent-Type: application/json\n\n{"id":42}\n```',
+    "## 修复建议",
+    "服务端读取记录前校验当前用户是否有权访问该记录。",
   ].join("\n");
   let reportStale = false;
 
@@ -129,6 +127,9 @@ test("finding detail shows its paired delivery report with AI CVSS and copy", as
   await expect(page.getByText("交付报告", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "交付报告" }).click();
   await expect(page.getByText(/CVSS 4\.0：.*评分 7\.3（高危）/)).toBeVisible();
+  for (const heading of ["描述", "攻击链路", "测试过程", "Burp 复现", "修复建议"]) {
+    await expect(page.getByText(heading, { exact: true })).toBeVisible();
+  }
   await expect(page.getByText(/漏洞等级.*高危/)).toHaveCount(0);
   await expect(page.getByText(officialVectors[0].vector)).toBeVisible();
   await expect(page.getByText("选择漏洞", { exact: true })).toHaveCount(0);

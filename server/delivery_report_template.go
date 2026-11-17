@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/wpsec/ARTEX-local/agent"
@@ -264,34 +265,17 @@ func deliveryAttackChainHasTree(report string) bool {
 func validateDeliveryReportTemplate(report, expectedVector string) error {
 	report = stripDeliveryTrafficEvidence(report)
 	sections := strings.Split(agent.DeliveryReportSectionOrder, "、")
-	requiredSubsections := map[string][]string{
-		"描述":   {"定级依据"},
-		"测试过程": {"发现过程与攻击思路", "失败尝试与未验证项", "Burp 复现"},
-		"证据说明": {"复测标准"},
-	}
 	sectionIndex, bodyStart := -1, 0
-	subsectionIndex, subsectionBodyStart := 0, -1
 	title, cvss := false, false
 	vectorOccurrences := 0
+	burpBodyStart, burpBodyEnd := -1, len(report)
 	var problem string
-	finishSubsection := func(end int) {
-		if problem != "" || subsectionBodyStart < 0 {
-			return
-		}
-		if !deliverySectionHasContent(report[subsectionBodyStart:end]) {
-			problem = "三级标题下的内容不能为空"
-		}
-	}
 	finishSection := func(end int) {
 		if problem != "" || sectionIndex < 0 {
 			return
 		}
 		if !deliverySectionHasContent(report[bodyStart:end]) {
-			problem = "“" + sections[sectionIndex] + "”章节为空"
-			return
-		}
-		if subsectionIndex != len(requiredSubsections[sections[sectionIndex]]) {
-			problem = "“" + sections[sectionIndex] + "”缺少必需的三级标题"
+			problem = "“" + sections[sectionIndex] + "”章节不能为空"
 		}
 	}
 	closed := walkDeliveryMarkdown(report, func(line string, offset int) {
@@ -315,8 +299,10 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 		}
 		if level == 2 {
 			if sectionIndex >= 0 {
-				finishSubsection(offset)
 				finishSection(offset)
+				if sections[sectionIndex] == "Burp 复现" && burpBodyEnd == len(report) {
+					burpBodyEnd = offset
+				}
 				if problem != "" {
 					return
 				}
@@ -328,30 +314,17 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 			}
 			sectionIndex = next
 			bodyStart = offset + len(line)
-			subsectionIndex = 0
-			subsectionBodyStart = -1
+			if text == "Burp 复现" {
+				burpBodyStart = bodyStart
+			}
 			return
 		}
 		if level == 3 {
-			if sectionIndex < 0 {
-				problem = "必需的三级标题必须放在对应章节内"
-				return
-			}
-			finishSubsection(offset)
-			if problem != "" {
-				return
-			}
-			required := requiredSubsections[sections[sectionIndex]]
-			if subsectionIndex >= len(required) || text != required[subsectionIndex] {
-				problem = "三级标题缺失、重复或位置错误：“" + text + "”"
-				return
-			}
-			subsectionIndex++
-			subsectionBodyStart = offset + len(line)
+			problem = "固定章节内不得添加额外子标题：“" + text + "”"
 			return
 		}
 		if level > 3 {
-			problem = "报告最多使用三级标题"
+			problem = "报告最多使用二级章节标题"
 			return
 		}
 		if sectionIndex < 0 {
@@ -380,22 +353,23 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 						problem = "CVSS 报告头无效或与 cvss_vector 参数不一致"
 						return
 					}
+					if !deliveryCVSSHeaderHasScore(trimmed, prefix, fields[0]) {
+						problem = "CVSS 报告头须包含有效分数或标注待复核"
+						return
+					}
 					cvss = true
 				}
 			}
 		}
 	})
-	if problem == "" {
-		if sectionIndex >= 0 {
-			finishSubsection(len(report))
-			finishSection(len(report))
-		}
+	if problem == "" && sectionIndex >= 0 {
+		finishSection(len(report))
 	}
 	if problem == "" && !closed {
 		problem = "代码块或 HTML 注释未闭合"
 	}
 	if problem == "" && (!title || !cvss) {
-		problem = "报告头须包含作为漏洞名称的一级标题及一行“CVSS 4.0：”完整 Base 向量"
+		problem = "报告头须包含作为漏洞名称的一级标题及带评分的一行完整 CVSS 4.0 Base 向量"
 	}
 	if problem == "" && vectorOccurrences != 1 {
 		problem = "CVSS 向量只能在报告头出现一次"
@@ -403,8 +377,15 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 	if problem == "" && sectionIndex != len(sections)-1 {
 		problem = "缺少必需章节"
 	}
-	if problem == "" && !deliverySectionHasContent(report[bodyStart:]) {
-		problem = "“证据说明”章节为空"
+	if problem == "" && burpBodyStart >= 0 {
+		burpBody := report[burpBodyStart:burpBodyEnd]
+		burpNotApplicable := strings.Contains(burpBody, "Burp 不适用")
+		burpPacketPresent := deliveryBurpHTTPRequestBlockPresent(burpBody)
+		if !burpNotApplicable && !burpPacketPresent {
+			problem = "“Burp 复现”必须提供 http 请求包；仅非 HTTP 场景可注明 Burp 不适用"
+		} else if !burpNotApplicable && deliveryBurpClaimsActualSend(burpBody) {
+			problem = "Burp 请求包仅供工程师复现或复测，不得描述为已通过 Burp 发送或验证"
+		}
 	}
 	if problem == "" && !deliveryAttackChainHasTree(report) {
 		problem = "“攻击链路”必须包含 text 代码块树形链路，且有起点和带内容的分支"
@@ -413,4 +394,102 @@ func validateDeliveryReportTemplate(report, expectedVector string) error {
 		return fmt.Errorf("交付报告格式不符合固定模板：%s；二级标题必须按顺序为：%s。请保留各节，证据不足写“未验证”，补齐后重新保存", problem, strings.Join(sections, "、"))
 	}
 	return nil
+}
+
+func deliveryBurpHTTPRequestBlockPresent(content string) bool {
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	var fence byte
+	fenceLength := 0
+	httpFence := false
+	requestFound := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if fence == 0 {
+			marker, length := deliveryOpeningFence(line)
+			if marker == 0 {
+				continue
+			}
+			fence, fenceLength = marker, length
+			httpFence = strings.EqualFold(strings.TrimSpace(trimmed[length:]), "http")
+			requestFound = false
+			continue
+		}
+		run := 0
+		for run < len(trimmed) && trimmed[run] == fence {
+			run++
+		}
+		if run >= fenceLength && strings.TrimSpace(trimmed[run:]) == "" {
+			if httpFence && requestFound {
+				return true
+			}
+			fence, fenceLength, httpFence, requestFound = 0, 0, false, false
+			continue
+		}
+		if httpFence && isDeliveryHTTPRequestLine(trimmed) {
+			requestFound = true
+		}
+	}
+	return false
+}
+
+func deliveryCVSSHeaderHasScore(line, prefix, vector string) bool {
+	fields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, prefix)))
+	if len(fields) < 2 || fields[0] != vector {
+		return false
+	}
+	if strings.HasPrefix(fields[1], "评分待复核") {
+		return true
+	}
+	if fields[1] != "评分" || len(fields) < 3 {
+		return false
+	}
+	if strings.HasPrefix(fields[2], "待复核") {
+		return true
+	}
+	scoreText := fields[2]
+	if boundary := strings.IndexAny(scoreText, "（("); boundary >= 0 {
+		scoreText = scoreText[:boundary]
+	}
+	score, err := strconv.ParseFloat(scoreText, 64)
+	return err == nil && score >= 0 && score <= 10
+}
+
+func deliveryBurpClaimsActualSend(content string) bool {
+	phrases := []string{
+		"已通过 Burp 发送", "已在 Burp 中发送", "已在 Burp Repeater 中发送",
+		"本次在 Burp 中发送", "实际在 Burp 中发送", "Burp Repeater 实际发送",
+		"本次使用 Burp Repeater 发送", "实际使用 Burp Repeater 发送",
+		"已通过 Burp Repeater 验证", "已在 Burp 中验证",
+	}
+	claimed := false
+	scanDeliveryMarkdown(content, func(line string, _ int, code bool) {
+		if claimed || code {
+			return
+		}
+		for _, phrase := range phrases {
+			searchFrom := 0
+			for searchFrom < len(line) {
+				relative := strings.Index(line[searchFrom:], phrase)
+				if relative < 0 {
+					break
+				}
+				position := searchFrom + relative
+				clauseStart := strings.LastIndexAny(line[:position], "。！？；\n") + 1
+				prefix := strings.TrimSpace(line[clauseStart:position])
+				negated := false
+				for _, marker := range []string{"不代表", "并未", "未曾", "尚未", "没有", "无法", "不能", "不得", "未", "不"} {
+					if strings.HasSuffix(prefix, marker) {
+						negated = true
+						break
+					}
+				}
+				if !negated {
+					claimed = true
+					return
+				}
+				searchFrom = position + len(phrase)
+			}
+		}
+	})
+	return claimed
 }

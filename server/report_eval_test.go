@@ -71,7 +71,7 @@ func (p *reportEvalProvider) Complete(_ context.Context, request llm.CompletionR
 
 func TestReportEvalRouteIsAuthenticatedOptInAndFixedInputOnly(t *testing.T) {
 	t.Setenv("ARTEX_REPORT_EVAL_ENABLED", "false")
-	modelResponseJSON := `{"cvss_vector":"CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N","description":"普通用户可修改他人作业，状态随之改变。","remediation":"服务端校验当前账号是否有权修改该作业。","test_process":"使用样本中的普通用户请求修改作业，再以所有者账号读取并检查状态。Burp Repeater 复测未验证；授权测试时可重放附加请求。","attack_chain":"FENCEtext\n普通用户\n└─ 修改接口\n   └─ 作业状态发生变化\nFENCE","discovery_path":"来源为离线合成请求与响应，未对真实目标测试。"}`
+	modelResponseJSON := `{"cvss_vector":"CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N","description":"普通用户可修改他人作业，状态随之改变。","remediation":"服务端校验当前账号是否有权修改该作业。","test_process":"使用样本中的普通用户请求修改作业，再以所有者账号读取并检查状态。","burp_reproduction":"请求包供授权复现。","attack_chain":"FENCEtext\n普通用户\n└─ 修改接口\n   └─ 作业状态发生变化\nFENCE"}`
 	provider := &reportEvalProvider{result: strings.ReplaceAll(modelResponseJSON, "FENCE", "```")}
 	s := &Server{llmProv: provider, llmOn: true, llmCfg: agent.Config{
 		Format: llm.FormatOpenAI, Model: "fixed-test-model", APIKey: "must-not-be-exposed",
@@ -320,10 +320,10 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"本次只生成交付报告草稿，不调用工具",
 		"平台生成标题、CVSS 行、五节标题和原始报文附件",
 		"只返回这个 JSON 对象",
-		"description 用短句写问题、成立条件和观察结果",
-		"test_process 依次包含“### 发现过程与攻击思路”“### 失败尝试与未验证项”“### Burp 复现”",
-		"连同请求包尽量不超过 300 字",
-		"discovery_path 包含“### 复测标准”和一句可判定的复测条件",
+		"description 用短句写问题、成立条件、观察结果和评分依据",
+		"test_process 第一行必须为“测试时间：<test_time_hint>”",
+		"burp_reproduction 对 HTTP 场景附最小必要请求包",
+		"不得把它写成已在 Burp 中发送或验证",
 		"attack_chain 不超过 230 字",
 		"attack_chain 只写一棵短树。单一流程的根节点使用实际页面或功能入口",
 		"HTTP 节点原样复制 METHOD/path",
@@ -352,8 +352,7 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"布尔注入的真、假条件各自成并列分支",
 		"非 HTTP 攻击链以“本地终端记录”为根",
 		"合成样本不能直接发往真实目标，也不能要求把样本值替换成真实凭据",
-		"建议复测请求（未发送）",
-		"所有 HTTP 报告都必须有 Burp Repeater 小节和至少一段足以复测核心结论的 HTTP 请求包，与 Burp 是否实际使用无关",
+		"所有 HTTP 报告都必须有独立的 Burp 复现章节和至少一段足以复现核心结论的 HTTP 请求包",
 		"材料没有 METHOD/path 时，代码块仍给出带占位符的请求行",
 		"任何真实 Authorization、Cookie、Token、会话标识或个人数据都改成用途明确的占位符",
 		"结果用自然语言说明业务状态，不得只写状态码/响应长度缩写或变量名",
@@ -361,11 +360,10 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"正文以 800 字为参考预算",
 		"无身份、真假条件等独立对照放在独立分支，不接在主流程之后造成因果暗示",
 		"除第一行根节点外，攻击链代码块中每个非空行都必须以“├─”或“└─”开始",
-		"### 定级依据",
-		"### 发现过程与攻击思路",
-		"### 失败尝试与未验证项",
-		"### Burp 复现",
-		"### 复测标准",
+		"不另设定级子标题",
+		"不加子标题",
+		"## Burp 复现",
+		"## 修复建议",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("report completion prompt is missing %q", required)
@@ -434,14 +432,14 @@ func TestDeliveryAttackChainGroupIndentationAccountsForTreeGuides(t *testing.T) 
 	}
 }
 
-func TestDeliveryReportDraftEnsuresRatingHeadingAndSanitizesSyntheticClaims(t *testing.T) {
+func TestDeliveryReportDraftKeepsRatingRationaleInDescriptionAndSanitizesSyntheticClaims(t *testing.T) {
 	message, err := json.Marshal(deliveryReportDraft{
-		CVSSVector:    "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
-		Description:   "离线合成场景，未测试真实目标。读取敏感数据的影响尚未验证。VC:L 为待复核的潜在影响假设。",
-		Remediation:   "阻止非授权用户访问敏感数据。",
-		TestProcess:   "### 发现过程与攻击思路\n读取到合成内容。\n### 失败尝试与未验证项\n真实影响未验证。\n### Burp 复现\n请求未发送。",
-		AttackChain:   "验证请求组\n└─ GET /api/me\n   └─ 返回用户信息",
-		DiscoveryPath: "### 复测标准\n退出后请求应被拒绝。",
+		CVSSVector:       "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+		Description:      "离线合成场景，未测试真实目标。读取敏感数据的影响尚未验证。VC:L 为待复核的潜在影响假设。",
+		Remediation:      "阻止非授权用户访问敏感数据。",
+		TestProcess:      "### 发现过程与攻击思路\n读取到合成内容。\n### 失败尝试与未验证项\n真实影响未验证。",
+		BurpReproduction: "请求包供授权复现。\n```http\nGET /api/me HTTP/1.1\nHost: report-eval.invalid\n```",
+		AttackChain:      "验证请求组\n└─ GET /api/me\n   └─ 返回用户信息",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -456,8 +454,8 @@ func TestDeliveryReportDraftEnsuresRatingHeadingAndSanitizesSyntheticClaims(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(draft.Description, "### 定级依据\nVC:L 为待复核的潜在影响假设。") {
-		t.Fatalf("rating rationale was not moved beneath its required heading: %s", draft.Description)
+	if !strings.Contains(draft.Description, "VC:L 为待复核的潜在影响假设。") || strings.Contains(draft.Description, "### 定级依据") {
+		t.Fatalf("rating rationale did not remain in the description without an extra heading: %s", draft.Description)
 	}
 	for name, content := range map[string]string{
 		"description": draft.Description,
@@ -527,17 +525,11 @@ func TestDeliveryReportDraftRestoresBurpSectionAndRedactsEvidencePacket(t *testi
 		TestProcess: strings.Join([]string{
 			"### 发现过程与攻击思路",
 			"按步骤重放请求。",
-			"Burp 不适用：本次仅基于离线合成材料。",
-			"```http",
-			"POST /api/jobs/job-a/types HTTP/1.1",
-			"Host: report-eval.invalid",
-			"Content-Type: application/json",
-			"",
-			`{"selectedTypes":["name"]}`,
-			"```",
+			"### 失败尝试与未验证项",
+			"其他资源未验证。",
 		}, "\n"),
-		AttackChain:   "验证请求组\n├─ 主流程\n│  └─ POST /api/jobs/job-a/types\n│     └─ 配置发生变化",
-		DiscoveryPath: "材料来自离线合成样本。\n### 复测标准\n非所有者提交后配置保持不变。",
+		AttackChain:      "验证请求组\n├─ 主流程\n│  └─ POST /api/jobs/job-a/types\n│     └─ 配置发生变化",
+		BurpReproduction: "请求内容在报告字段中提供。",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -549,16 +541,11 @@ func TestDeliveryReportDraftRestoresBurpSectionAndRedactsEvidencePacket(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	process := draft.TestProcess
-	burpStart, burpEnd := deliveryBurpSectionRange(process)
-	if burpStart < 0 || burpEnd <= burpStart {
-		t.Fatalf("HTTP report is missing its Burp subsection: %s", process)
+	if strings.Contains(draft.TestProcess, "### ") || !strings.HasPrefix(draft.TestProcess, "测试时间：未记录") {
+		t.Fatalf("test process retained nested headings or lacks a time line: %s", draft.TestProcess)
 	}
-	if !strings.Contains(process, "### 失败尝试与未验证项") || strings.Index(process, "### 失败尝试与未验证项") > strings.Index(process, "### Burp 复现") {
-		t.Fatalf("required test subsections are missing or out of order: %s", process)
-	}
-	burpSection := strings.Join(strings.Split(process, "\n")[burpStart+1:burpEnd], "\n")
-	if !strings.Contains(burpSection, "本次未在 Burp Repeater 中发送") || !strings.Contains(burpSection, "POST /api/jobs/job-a/types HTTP/1.1") {
+	burpSection := draft.BurpReproduction
+	if !strings.Contains(burpSection, "请求包供渗透测试工程师") || !strings.Contains(burpSection, "不代表已通过 Burp 发送或验证") || !strings.Contains(burpSection, "POST /api/jobs/job-a/types HTTP/1.1") {
 		t.Fatalf("Burp guidance or the request packet is missing: %s", burpSection)
 	}
 	if strings.Contains(burpSection, "Burp 不适用") {
@@ -572,12 +559,12 @@ func TestDeliveryReportDraftRestoresBurpSectionAndRedactsEvidencePacket(t *testi
 func TestDeliveryReportDraftLabelsSyntheticMaterialAndNormalizesBurpSection(t *testing.T) {
 	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
 	message, err := json.Marshal(deliveryReportDraft{
-		CVSSVector:    vector,
-		Description:   "普通用户可修改其他用户设置。\n### 定级依据\n观察到配置变化。",
-		Remediation:   "拒绝非所有者的修改请求。",
-		TestProcess:   "### 发现过程与攻击思路\n重放修改请求。\n### 失败尝试与未验证项\n未检查其他资源。\n### Burp 复现\n本次未在 Burp 中发送；以下为建议复测请求（未发送）。建议复测请求（未发送）：\n```http\nPOST /api/jobs/job-a/types HTTP/1.1\nHost: report-eval.invalid\n```",
-		AttackChain:   "验证请求组\n└─ POST /api/jobs/job-a/types\n   └─ 修改成功",
-		DiscoveryPath: "离线样本。\n### 复测标准\n非所有者请求应失败。",
+		CVSSVector:       vector,
+		Description:      "普通用户可修改其他用户设置。\n### 定级依据\n观察到配置变化。",
+		Remediation:      "拒绝非所有者的修改请求。",
+		TestProcess:      "### 发现过程与攻击思路\n重放修改请求。\n### 失败尝试与未验证项\n未检查其他资源。",
+		BurpReproduction: "离线合成请求样例，不能直接发送到真实目标。\n```http\nPOST /api/jobs/job-a/types HTTP/1.1\nHost: report-eval.invalid\n```",
+		AttackChain:      "验证请求组\n└─ POST /api/jobs/job-a/types\n   └─ 修改成功",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -596,13 +583,10 @@ func TestDeliveryReportDraftLabelsSyntheticMaterialAndNormalizesBurpSection(t *t
 	if strings.Count(draft.Description, "未测试真实目标") != 1 {
 		t.Fatalf("synthetic scope was duplicated: %s", draft.Description)
 	}
-	burpStart, burpEnd := deliveryBurpSectionRange(draft.TestProcess)
-	if burpStart < 0 || burpEnd <= burpStart {
-		t.Fatalf("HTTP report is missing its Burp subsection: %s", draft.TestProcess)
-	}
-	burpSection := strings.Join(strings.Split(draft.TestProcess, "\n")[burpStart+1:burpEnd], "\n")
+	burpSection := draft.BurpReproduction
 	for _, expected := range []string{
-		"离线合成请求未发送到真实目标",
+		"离线合成请求样例，不能直接发送到真实目标",
+		"不代表已通过 Burp 发送或验证",
 		"POST /api/jobs/job-a/types HTTP/1.1",
 		"X-Eval-Actor: user-b",
 		`{"selectedTypes":["name"]}`,
@@ -619,12 +603,11 @@ func TestDeliveryReportDraftLabelsSyntheticMaterialAndNormalizesBurpSection(t *t
 func TestDeliveryReportDraftAddsEvidenceRequestWhenModelOmitsPacket(t *testing.T) {
 	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
 	message, err := json.Marshal(deliveryReportDraft{
-		CVSSVector:    vector,
-		Description:   "问题已观察。\n### 定级依据\n证据说明完整性影响。",
-		Remediation:   "校验资源归属。",
-		TestProcess:   "### 发现过程与攻击思路\n按步骤核对请求。\n### 失败尝试与未验证项\n没有其他失败记录。",
-		AttackChain:   "验证请求\n└─ POST /api/jobs/job-a/types\n   └─ 修改成功",
-		DiscoveryPath: "材料来自绑定请求。\n### 复测标准\n非所有者请求被拒绝。",
+		CVSSVector:  vector,
+		Description: "问题已观察。\n### 定级依据\n证据说明完整性影响。",
+		Remediation: "校验资源归属。",
+		TestProcess: "### 发现过程与攻击思路\n按步骤核对请求。\n### 失败尝试与未验证项\n没有其他失败记录。",
+		AttackChain: "验证请求\n└─ POST /api/jobs/job-a/types\n   └─ 修改成功",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -637,13 +620,10 @@ func TestDeliveryReportDraftAddsEvidenceRequestWhenModelOmitsPacket(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	burpStart, burpEnd := deliveryBurpSectionRange(draft.TestProcess)
-	if burpStart < 0 || burpEnd <= burpStart {
-		t.Fatalf("HTTP report is missing its Burp subsection: %s", draft.TestProcess)
-	}
-	burpSection := strings.Join(strings.Split(draft.TestProcess, "\n")[burpStart+1:burpEnd], "\n")
+	burpSection := draft.BurpReproduction
 	for _, expected := range []string{
-		"建议复测请求（未发送）",
+		"请求包供渗透测试工程师在授权目标中导入 Burp Repeater",
+		"不代表已通过 Burp 发送或验证",
 		"POST /api/jobs/job-a/types?access_token=%5BREDACTED%5D HTTP/1.1",
 		"Authorization: [REDACTED]",
 		"Cookie: [REDACTED]",
@@ -802,7 +782,7 @@ func TestDeliveryNonHTTPBurpSectionRemovesFabricatedRequest(t *testing.T) {
 	}, "\n")
 
 	got := ensureDeliveryBurpSection(content, "", "non_http", false)
-	if !strings.Contains(got, "Burp 不适用：本次通过本地命令或终端记录验证。") {
+	if !strings.Contains(got, "Burp 不适用：本次证据为本地命令或终端输出。") {
 		t.Fatalf("non-HTTP report is missing the required boundary: %s", got)
 	}
 	if strings.Contains(got, "```http") || strings.Contains(got, "/fabricated") {
@@ -810,37 +790,53 @@ func TestDeliveryNonHTTPBurpSectionRemovesFabricatedRequest(t *testing.T) {
 	}
 }
 
-func TestDeliveryReportMarkdownFallbackParsesFullModelReport(t *testing.T) {
+func TestDeliveryHTTPBurpSectionUsesOnlyRecordedRequests(t *testing.T) {
+	recorded := "证据绑定 1（漏洞验证）\nGET /records/42 HTTP/1.1\r\nHost: app.example\r\n\r\n"
+	got := ensureDeliveryBurpSection("Burp 不适用。", recorded, "http", false)
+	if !strings.Contains(got, "GET /records/42 HTTP/1.1") || strings.Contains(got, "Burp 不适用") {
+		t.Fatalf("HTTP evidence was not used for the Burp reproduction packet: %s", got)
+	}
+
+	fabricated := "```http\nGET /invented HTTP/1.1\nHost: app.example\n```"
+	got = ensureDeliveryBurpSection(fabricated, "", "http", false)
+	if strings.Contains(got, "/invented") || !strings.Contains(got, "<METHOD> <PATH> HTTP/1.1") {
+		t.Fatalf("model-authored request was accepted without source evidence: %s", got)
+	}
+
+	got = ensureDeliveryBurpSection("", "GET /records/43 HTTP/1.1\r\n\r\n", "http", false)
+	if !strings.Contains(got, "Host: <需从授权账号重新捕获>") || !strings.Contains(got, "原始请求未记录 Host") {
+		t.Fatalf("request without Host was not marked incomplete: %s", got)
+	}
+}
+
+func TestDeliveryReportMarkdownFallbackParsesRequiredSections(t *testing.T) {
 	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
 	markdown := `# 测试系统 越权修改：普通用户可修改他人配置
 CVSS 4.0：` + vector + ` 评分 6.1（中）
 
 ## 描述
 普通用户可修改其他用户的配置。
-### 定级依据
-已观察到完整性影响。
-
-## 修复建议
-服务端校验作业归属后再更新配置。
-
-## 测试过程
-### 发现过程与攻击思路
-普通用户重放更新请求并回读配置。
-### 失败尝试与未验证项
-未测试其他作业状态。
-### Burp 复现
-本次未使用 Burp Repeater；复测未验证。
 
 ## 攻击链路
 普通用户
 └─ POST /api/jobs/job-a/types
    └─ 配置发生变化
 
-## 证据说明
-### 证据说明
-材料来自固定合成样本。
-### 复测标准
-非所有者请求被拒绝且配置不变。`
+## 测试过程
+测试时间：未记录
+
+普通用户重放更新请求并回读配置。未测试其他作业状态。
+
+## Burp 复现
+离线合成请求样例，不能直接发送到真实目标。以下请求包供渗透测试工程师在授权目标中导入 Burp Repeater 复现或复测；请求包本身不代表已通过 Burp 发送或验证。
+~~~http
+POST /api/jobs/job-a/types HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-b
+~~~
+
+## 修复建议
+服务端校验作业归属后再更新配置。`
 	input := map[string]string{"cvss_vector_hint": vector}
 	draft, usage, err := completeDeliveryReportWith(context.Background(), input, 4, func(_ context.Context, request llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
 		if len(request.Tools) != 0 {
@@ -854,7 +850,7 @@ CVSS 4.0：` + vector + ` 评分 6.1（中）
 	if usage.OutputTokens != 80 || draft.CVSSVector != vector || draft.EvidenceVersion != 4 {
 		t.Fatalf("metadata lost during Markdown fallback: usage=%+v draft=%+v", usage, draft)
 	}
-	for _, value := range []string{draft.Description, draft.Remediation, draft.TestProcess, draft.DiscoveryPath} {
+	for _, value := range []string{draft.Description, draft.Remediation, draft.TestProcess, draft.BurpReproduction} {
 		if strings.TrimSpace(value) == "" {
 			t.Fatal("Markdown fallback returned an empty report field")
 		}
@@ -862,20 +858,19 @@ CVSS 4.0：` + vector + ` 评分 6.1（中）
 	if !strings.HasPrefix(draft.AttackChain, "```text\n") || !strings.Contains(draft.AttackChain, "POST /api/jobs/job-a/types") {
 		t.Fatalf("Markdown fallback did not preserve and fence the attack chain: %s", draft.AttackChain)
 	}
-	if strings.Contains(draft.DiscoveryPath, "### 证据说明") || !strings.Contains(draft.DiscoveryPath, "材料来自固定合成样本。") {
-		t.Fatalf("Markdown fallback kept a redundant evidence subheading or lost its text: %s", draft.DiscoveryPath)
+	if !strings.Contains(draft.BurpReproduction, "不代表已通过 Burp 发送或验证") {
+		t.Fatalf("Markdown fallback lost the Burp request usage boundary: %s", draft.BurpReproduction)
 	}
 }
 
-func TestDeliveryReportDraftMovesRequiredSubheadingsToOwnLines(t *testing.T) {
+func TestDeliveryReportDraftRemovesLegacySubheadings(t *testing.T) {
 	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
 	raw, err := json.Marshal(deliveryReportDraft{
-		CVSSVector:    vector,
-		Description:   "普通用户可修改作业。定级依据：现有材料显示配置已变化。",
-		Remediation:   "服务端校验作业归属。",
-		TestProcess:   "步骤。### 发现过程与攻击思路：重放修改请求。### 失败尝试与未验证项：没有记录失败尝试。### Burp 复现：Burp 复测未验证。",
-		AttackChain:   "普通用户\n└─ POST /api/jobs/job-a/types\n   └─ 配置改变",
-		DiscoveryPath: "证据来自固定样本。### 复测标准：非所有者请求被拒绝，作业配置保持不变。",
+		CVSSVector:  vector,
+		Description: "普通用户可修改作业。定级依据：现有材料显示配置已变化。",
+		Remediation: "服务端校验作业归属。",
+		TestProcess: "测试时间：2026-11-01 10:00:00（北京时间）\n步骤。### 发现过程与攻击思路：重放修改请求。### 失败尝试与未验证项：没有记录失败尝试。",
+		AttackChain: "普通用户\n└─ POST /api/jobs/job-a/types\n   └─ 配置改变",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -884,13 +879,13 @@ func TestDeliveryReportDraftMovesRequiredSubheadingsToOwnLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{draft.Description, draft.TestProcess, draft.DiscoveryPath} {
-		if strings.Contains(value, "。### ") {
-			t.Fatalf("subheading remained attached to prose: %q", value)
+	for _, value := range []string{draft.Description, draft.TestProcess, draft.BurpReproduction} {
+		if strings.Contains(value, "### ") || strings.Contains(value, "。### ") {
+			t.Fatalf("legacy subheading remained in a report field: %q", value)
 		}
 	}
-	if !strings.Contains(draft.Description, "\n### 定级依据\n") {
-		t.Fatalf("plain rating label was not normalized to a required subheading: %q", draft.Description)
+	if !strings.Contains(draft.Description, "现有材料显示配置已变化。") {
+		t.Fatalf("rating rationale was not retained in the description: %q", draft.Description)
 	}
 	joinedHeading := normalizeDeliveryDraftSubheadings("结果。### 定级依据影响已观察。", "定级依据")
 	if !strings.Contains(joinedHeading, "\n### 定级依据\n影响已观察。") {
@@ -900,18 +895,17 @@ func TestDeliveryReportDraftMovesRequiredSubheadingsToOwnLines(t *testing.T) {
 	if !strings.Contains(compactBurpHeading, "\n### Burp 复现\n建议在授权环境重放。") {
 		t.Fatalf("compact Burp label was not normalized to the fixed heading: %q", compactBurpHeading)
 	}
-	missingDiscoveryHeading := ensureDeliveryDraftDiscoveryHeading("测试时间：2026-11-01 10:00:00（北京时间）\n1. 执行基线查询。")
-	if !strings.Contains(missingDiscoveryHeading, "测试时间：2026-11-01 10:00:00（北京时间）\n\n### 发现过程与攻击思路\n\n1. 执行基线查询。") {
-		t.Fatalf("missing discovery heading was not inserted after the test time: %q", missingDiscoveryHeading)
+	if strings.Contains(draft.TestProcess, "发现过程与攻击思路") || strings.Contains(draft.TestProcess, "失败尝试与未验证项") {
+		t.Fatalf("legacy test-process headings were not removed: %q", draft.TestProcess)
 	}
 	report := strings.Join([]string{
 		"# 测试系统 作业越权",
-		"CVSS 4.0：" + vector + " 评分 待复核（待复核）",
+		"CVSS 4.0：" + vector + " 评分待复核",
 		"## 描述\n\n" + draft.Description,
-		"## 修复建议\n\n" + draft.Remediation,
-		"## 测试过程\n\n" + draft.TestProcess,
 		"## 攻击链路\n\n" + draft.AttackChain,
-		"## 证据说明\n\n" + draft.DiscoveryPath,
+		"## 测试过程\n\n" + draft.TestProcess,
+		"## Burp 复现\n\n" + draft.BurpReproduction,
+		"## 修复建议\n\n" + draft.Remediation,
 	}, "\n\n")
 	if err := validateDeliveryReportTemplate(report, vector); err != nil {
 		t.Fatalf("normalized draft does not meet the report template: %v", err)
@@ -927,7 +921,7 @@ func TestDeliveryReportCompletionUsesProvidedCVSSVectorHint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	modelDraft := `{"cvss_vector":"not-a-cvss-vector","description":"线索待核实。\n### 定级依据\n当前证据不足。","remediation":"先补齐响应正文。","test_process":"### 发现过程与攻击思路\n复核现有请求。\n### 失败尝试与未验证项\n文件内容未取得。\n### Burp 复现\nBurp 复测未验证。","attack_chain":"用户 B 请求文件\n└─ 仅留存 HTTP 200 响应头","discovery_path":"来源为合成材料。\n### 复测标准\n取得完整响应并比对文件。"}`
+	modelDraft := `{"cvss_vector":"not-a-cvss-vector","description":"线索待核实。\n当前证据不足。","remediation":"先补齐响应正文。","test_process":"测试时间：未记录\n复核现有请求。文件内容未取得。","burp_reproduction":"请求包供授权复现。\n\u0060\u0060\u0060http\nGET /api/files/file-a/download HTTP/1.1\nHost: report-eval.invalid\n\u0060\u0060\u0060","attack_chain":"用户 B 请求文件\n└─ 仅留存 HTTP 200 响应头"}`
 	draft, _, err := completeDeliveryReportWith(context.Background(), input, 0, func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
 		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock(modelDraft)}}, "end_turn", llm.Usage{}, nil
 	})
@@ -1085,7 +1079,7 @@ func TestDeliveryReportConcurrencyEvidenceHint(t *testing.T) {
 }
 
 func TestDeliveryReportDraftDisablesConfiguredResponsesReasoning(t *testing.T) {
-	modelDraft := `{"cvss_vector":"CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:L/SC:N/SI:L/SA:N","description":"问题描述。\n### 定级依据\n有可复核证据。","remediation":"在服务端校验资源归属。","test_process":"### 发现过程与攻击思路\n用 Burp Repeater 重放样本请求。\n### 失败尝试与未验证项\n批量编号未验证。\n### Burp 复现\n按授权账号复测。","attack_chain":"普通用户\n└─ 修改请求\n   └─ 其他用户数据发生变化","discovery_path":"来源为合成材料。\n### 复测标准\n跨用户请求应被拒绝。"}`
+	modelDraft := `{"cvss_vector":"CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:L/SC:N/SI:L/SA:N","description":"问题描述。\n有可复核证据。","remediation":"在服务端校验资源归属。","test_process":"测试时间：未记录\n用授权账号核对请求和响应。批量编号未验证。","burp_reproduction":"请求包供渗透测试工程师导入 Repeater。","attack_chain":"普通用户\n└─ 修改请求\n   └─ 其他用户数据发生变化"}`
 	receivedCh := make(chan map[string]json.RawMessage, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
