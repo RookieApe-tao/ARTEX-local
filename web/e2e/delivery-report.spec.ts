@@ -51,11 +51,7 @@ test("CVSS-B scoring follows FIRST's reference lookup for a conflicting example"
   expect(scoreCVSS4Base(vector)).toMatchObject({ score: 9.2, severity: "严重" });
 });
 
-test("finding detail shows its paired delivery report with AI CVSS and copy", async ({
-  context,
-  page,
-  baseURL,
-}) => {
+test("finding detail shows its paired delivery report with AI CVSS and copy", async ({ context, page, baseURL }) => {
   if (!baseURL) throw new Error("Playwright baseURL is required");
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await context.addCookies([{ name: "artex_token", value: "delivery-report-e2e", url: baseURL }]);
@@ -131,8 +127,9 @@ test("finding detail shows its paired delivery report with AI CVSS and copy", as
   await page.goto("/function/findings/detail?id=1001");
   await expect(page.getByText("详细报告原文保持不变。")).toBeVisible();
   await expect(page.getByText("交付报告", { exact: true })).toBeVisible();
-  await expect(page.getByText(/CVSS 4\.0 评分.*7\.3（CVSS-B）/)).toBeVisible();
-  await expect(page.getByText(/漏洞等级.*高危/)).toBeVisible();
+  await page.getByRole("tab", { name: "交付报告" }).click();
+  await expect(page.getByText(/CVSS 4\.0：.*评分 7\.3（高危）/)).toBeVisible();
+  await expect(page.getByText(/漏洞等级.*高危/)).toHaveCount(0);
   await expect(page.getByText(officialVectors[0].vector)).toBeVisible();
   await expect(page.getByText("选择漏洞", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "生成草稿" })).toHaveCount(0);
@@ -140,12 +137,14 @@ test("finding detail shows its paired delivery report with AI CVSS and copy", as
 
   await page.getByRole("button", { name: "复制交付报告" }).click();
   const copied = await page.evaluate(() => navigator.clipboard.readText());
-  expect(copied).toContain(`- **CVSS 4.0 Base 向量（CVSS-B）**：${officialVectors[0].vector}`);
-  expect(copied).toContain("- **CVSS 4.0 评分**：7.3（CVSS-B）");
-  expect(copied).toContain("- **漏洞等级**：高危");
+  expect(copied).toContain(`CVSS 4.0：${officialVectors[0].vector}  评分 7.3（高危）`);
+  expect(copied).not.toContain("CVSS-B");
+  expect(copied).not.toContain("漏洞等级");
 
   reportStale = true;
   await page.reload();
+  await page.getByRole("tab", { name: "交付报告" }).click();
   await expect(page.getByText("漏洞证据已变化，交付报告可能引用旧证据。")).toBeVisible();
+  await page.getByRole("tab", { name: "概览" }).click();
   await expect(page.getByText("详细报告原文保持不变。")).toBeVisible();
 });

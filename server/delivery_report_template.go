@@ -258,7 +258,7 @@ func deliveryAttackChainHasTree(report string) bool {
 			textFenceCount++
 		}
 	}
-	return textFenceCount == 1 && treeRoot && treeRootCount == 1 && treeBranch
+	return textFenceCount == 1 && treeRoot && treeRootCount == 1 && treeBranch && fence == 0 && !inComment
 }
 
 func validateDeliveryReportTemplate(report, expectedVector string) error {
