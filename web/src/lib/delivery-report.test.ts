@@ -99,3 +99,18 @@ test("reports without an authoritative vector and empty reports stay unchanged",
   assert.equal(applyCVSSMetadata("# 原报告", ""), "# 原报告");
   assert.equal(applyCVSSMetadata("", vector), "");
 });
+
+test("internal evidence marker is hidden from rendered and copied reports", () => {
+  for (const marker of ["<!-- artex:bound-traffic-evidence -->", "\\<!-- artex:bound-traffic-evidence -->\\"]) {
+    const content = `# 报告\n\n## 证据说明\n来源已记录。\n\n${marker}\n`;
+    const result = applyCVSSMetadata(content, vector);
+    assert.doesNotMatch(result, /artex:bound-traffic-evidence/);
+    assert.equal(applyCVSSMetadata(content, ""), "# 报告\n\n## 证据说明\n来源已记录。\n\n");
+  }
+});
+
+test("marker-like text inside captured HTTP packets remains untouched", () => {
+  const packet = "```http\nGET / HTTP/1.1\n\n<!-- artex:bound-traffic-evidence -->\n```";
+  const result = applyCVSSMetadata(`# 报告\n\n## 证据说明\n${packet}`, vector);
+  assert.ok(result.includes(packet));
+});

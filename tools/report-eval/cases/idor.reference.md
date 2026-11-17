@@ -16,7 +16,16 @@ CVSS 4.0：CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N  评�
 ### 失败尝试与未验证项
 不带身份的修改返回 401。其他作业状态、批量编号和正式文件内容未验证。
 ### Burp 复现
-本次未在 Burp Repeater 中测试。复测时分别使用 A、B 正常登录后捕获的请求，依次核对基线、修改响应和 A 的回读结果；不要用样本身份标记模拟账号。
+本次未在 Burp Repeater 中测试。用 A、B 正常登录后分别捕获请求，核对修改和回读；不要使用样本身份标记模拟账号。以下为请求模板，未发送：
+
+```http
+POST /api/jobs/job-a/types HTTP/1.1
+Host: <授权目标域名>
+Authorization: <由 B 正常登录后捕获>
+Content-Type: application/json
+
+{"selectedTypes":["name"]}
+```
 
 ## 攻击链路
 ```text

@@ -619,6 +619,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.upgradeReporterDeliveryTemplateV20() // 更新共享攻击链规范，避免旧默认提示词重复叠加
 	s.upgradeReporterDeliveryTemplateV21() // 收紧合成样本、根因和未验证影响的表述
 	s.upgradeReporterDeliveryTemplateV22() // 明确独立对照分支、原样命令和潜在影响边界
+	s.upgradeReporterDeliveryTemplateV23() // 改善 Burp 请求包、报告术语和攻击链可读性
 	s.upgradeReporterTriggerMessage()      // 老库触发消息同步报告版式与链路图规范
 	s.upgradeReporterTriggerMessageV11()   // 移除触发消息中重复的报告写作规则
 	s.seedFindingTrafficTools()            // 增加可选证据参数及只读证据工具，保留用户配置
@@ -791,7 +792,8 @@ func reporterPromptHashNeedsTemplateUpgrade(hash string) bool {
 		"17aa6f65e6d88922dc086b17730357c00b3ef9d55535a85d513eb3cc795ede4e", // v18 事实整理默认提示词
 		"2e629b3e35fcab552a9a901419af419dfb721ebf15a654e9f8443f1c44d2d3ee", // v19 旧版 Reporter 默认提示词
 		"29a290fbc2d42bce7cf282b8c4da46605ee4deac38b9cf7df2500dad13d8171f", // v20 旧版 Reporter 默认提示词
-		"cf8c3a66a8230ab9bf7095d32e7025e56135010936d1f86765acc413ba441023": // v21 证据边界默认提示词
+		"cf8c3a66a8230ab9bf7095d32e7025e56135010936d1f86765acc413ba441023", // v21 证据边界默认提示词
+		"0b3a0eec07ad86b6302a9072399ad5cecf46cf3d21dabd0192ee5277b5191834": // v22 原样命令与证据边界默认提示词
 		return true
 	default:
 		return false
@@ -1021,6 +1023,39 @@ func (s *Server) upgradeReporterDeliveryTemplateV22() {
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存独立对照提示词迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV23() {
+	const flag = "reporter_prompt_delivery_template_v23"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取可复现请求包提示词迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新 Burp 请求包与可读性规则失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已同步 Burp 请求包、通俗表达和攻击链结果规则")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存可复现请求包提示词迁移标记失败: %v", err)
 	}
 }
 
