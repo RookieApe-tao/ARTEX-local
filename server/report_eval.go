@@ -161,6 +161,14 @@ func reportEvalPromptInput(sample reporteval.Case, material []byte) (map[string]
 		}
 	}
 	requestPacket := reportEvalPackets(sample.Evidence, true)
+	requestOccurrenceIndex, err := reportEvalRequestOccurrenceIndex(sample.Evidence)
+	if err != nil {
+		return nil, err
+	}
+	commandLineIndex, err := reportEvalCommandLineIndex(sample.Evidence)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]string{
 		"task_description":                  "离线合成交付报告评测；不对应真实系统或真实测试。",
 		"task_goal":                         "仅根据固定样本写报告，不执行命令、不调用工具、不访问网络。",
@@ -182,8 +190,64 @@ func reportEvalPromptInput(sample reporteval.Case, material []byte) (map[string]
 		"existing_detailed_report_is_stale": "false",
 		"request_packet":                    requestPacket,
 		"request_line_index":                deliveryReportRequestLineIndex(requestPacket),
+		"request_occurrence_index":          requestOccurrenceIndex,
+		"command_line_index":                commandLineIndex,
 		"response_packet":                   reportEvalPackets(sample.Evidence, false),
 	}, nil
+}
+
+func reportEvalRequestOccurrenceIndex(evidence []reporteval.Evidence) (string, error) {
+	type occurrence struct {
+		Purpose      string `json:"purpose"`
+		RequestLine  string `json:"request_line"`
+		ResponseLine string `json:"response_line,omitempty"`
+	}
+	index := make([]occurrence, 0, len(evidence))
+	for _, item := range evidence {
+		requestLine := ""
+		for _, line := range strings.Split(item.Request, "\n") {
+			fields := strings.Fields(strings.TrimSuffix(line, "\r"))
+			if len(fields) >= 3 && strings.HasPrefix(fields[2], "HTTP/") {
+				requestLine = fields[0] + " " + fields[1]
+				break
+			}
+		}
+		if requestLine == "" {
+			continue
+		}
+		responseLine, _, _ := strings.Cut(strings.TrimSpace(item.Response), "\n")
+		index = append(index, occurrence{Purpose: item.Purpose, RequestLine: requestLine, ResponseLine: strings.TrimSpace(responseLine)})
+	}
+	if len(index) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(index)
+	if err != nil {
+		return "", fmt.Errorf("marshal report evaluation request occurrence index: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func reportEvalCommandLineIndex(evidence []reporteval.Evidence) (string, error) {
+	type command struct {
+		Purpose string `json:"purpose"`
+		Command string `json:"command"`
+	}
+	index := make([]command, 0, len(evidence))
+	for _, item := range evidence {
+		if strings.TrimSpace(item.Command) == "" {
+			continue
+		}
+		index = append(index, command{Purpose: item.Purpose, Command: item.Command})
+	}
+	if len(index) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(index)
+	if err != nil {
+		return "", fmt.Errorf("marshal report evaluation command line index: %w", err)
+	}
+	return string(encoded), nil
 }
 
 func evidenceHTTPStatus(response string) int {
