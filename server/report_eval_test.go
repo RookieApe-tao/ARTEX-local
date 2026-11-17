@@ -320,9 +320,11 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"本次只生成交付报告草稿，不调用工具",
 		"平台生成标题、CVSS 行、五节标题和原始报文附件",
 		"只返回这个 JSON 对象",
-		"description 先用两三句写问题、成立条件和观察结果，再依次包含“### 定级依据”和一两句评分依据",
+		"description 用短句写问题、成立条件和观察结果",
 		"test_process 依次包含“### 发现过程与攻击思路”“### 失败尝试与未验证项”“### Burp 复现”",
+		"连同请求包尽量不超过 300 字",
 		"discovery_path 包含“### 复测标准”和一句可判定的复测条件",
+		"attack_chain 不超过 230 字",
 		"attack_chain 只写一棵短树。单一流程的根节点使用实际页面或功能入口",
 		"HTTP 节点原样复制 METHOD/path",
 		"平台会添加 text 代码围栏",
@@ -340,7 +342,7 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"任何真实 Authorization、Cookie、Token、会话标识或个人数据都改成用途明确的占位符",
 		"结果用自然语言说明业务状态，不得只写状态码/响应长度缩写或变量名",
 		"避免测试脚本内部说法和难懂缩写",
-		"正文尽量控制在 800 字以内，不硬截断",
+		"正文以 800 字为参考预算",
 		"无身份、真假条件等独立对照放在独立分支，不接在主流程之后造成因果暗示",
 		"### 定级依据",
 		"### 发现过程与攻击思路",
@@ -384,6 +386,7 @@ CVSS 4.0：` + vector + ` 评分 6.1（中）
    └─ 配置发生变化
 
 ## 证据说明
+### 证据说明
 材料来自固定合成样本。
 ### 复测标准
 非所有者请求被拒绝且配置不变。`
@@ -407,6 +410,9 @@ CVSS 4.0：` + vector + ` 评分 6.1（中）
 	}
 	if !strings.HasPrefix(draft.AttackChain, "```text\n") || !strings.Contains(draft.AttackChain, "POST /api/jobs/job-a/types") {
 		t.Fatalf("Markdown fallback did not preserve and fence the attack chain: %s", draft.AttackChain)
+	}
+	if strings.Contains(draft.DiscoveryPath, "### 证据说明") || !strings.Contains(draft.DiscoveryPath, "材料来自固定合成样本。") {
+		t.Fatalf("Markdown fallback kept a redundant evidence subheading or lost its text: %s", draft.DiscoveryPath)
 	}
 }
 
@@ -548,6 +554,23 @@ func TestEnsureDeliveryAttackChainTextFence(t *testing.T) {
 	concurrentThreeWant := "```text\nGET /api/registrations?reference=EVAL-RACE\n   └─ HTTP 200 total=0\n      ├─ 并发提交 3 次相同请求\n      │  ├─ POST /api/registrations\n      │  │  └─ HTTP 201 id=reg-1\n      │  ├─ POST /api/registrations\n      │  │  └─ HTTP 201 id=reg-2\n      │  └─ POST /api/registrations\n      │     └─ HTTP 201 id=reg-3\n      └─ GET /api/registrations?reference=EVAL-RACE\n         └─ HTTP 200 total=3\n```"
 	if got := ensureDeliveryAttackChainTextFenceWithEvidence(concurrentThree, requestPacket, true); got != concurrentThreeWant {
 		t.Fatalf("concurrent evidence with unrelated same-path request was normalized incorrectly:\n%s\nwant:\n%s", got, concurrentThreeWant)
+	}
+	omittedFirstConcurrentRequest := "验证请求组\n├─ 主流程\n│  ├─ GET /api/registrations?reference=EVAL-RACE (基线)\n│  │  └─ 结果：HTTP 200 OK，total 为 0\n│  ├─ 并发提交 3 次相同请求\n│  │  ├─ 结果：HTTP 201 Created，id 为 reg-1\n│  │  ├─ POST /api/registrations (第二次并发提交)\n│  │  │  └─ 结果：HTTP 201 Created，id 为 reg-2\n│  │  └─ POST /api/registrations (第三次并发提交)\n│  │     └─ 结果：HTTP 201 Created，id 为 reg-3\n│  └─ GET /api/registrations?reference=EVAL-RACE (回读)\n│     └─ 结果：HTTP 200 OK，total 为 3"
+	repairedConcurrentChain := ensureDeliveryAttackChainTextFenceWithEvidence(omittedFirstConcurrentRequest, requestPacket, true)
+	if got := strings.Count(repairedConcurrentChain, "POST /api/registrations"); got != 3 {
+		t.Fatalf("normalizer left an omitted concurrent request node: got %d POST nodes in\n%s", got, repairedConcurrentChain)
+	}
+	firstConcurrentPost := strings.Index(repairedConcurrentChain, "POST /api/registrations")
+	firstConcurrentResult := strings.Index(repairedConcurrentChain, "id 为 reg-1")
+	secondConcurrentPost := strings.Index(repairedConcurrentChain[firstConcurrentPost+1:], "POST /api/registrations")
+	if firstConcurrentPost < 0 || firstConcurrentResult < firstConcurrentPost || secondConcurrentPost < 0 ||
+		firstConcurrentPost+1+secondConcurrentPost < firstConcurrentResult {
+		t.Fatalf("orphaned first response was not attached to its reconstructed request:\n%s", repairedConcurrentChain)
+	}
+	unrelatedConcurrentRequest := "验证请求组\n├─ 主流程\n│  ├─ GET /api/registrations?reference=EVAL-RACE (基线)\n│  ├─ 并发提交 3 次相同请求\n│  │  ├─ 结果：HTTP 201 Created，id 为 reg-1\n│  │  ├─ POST /api/registrations\n│  │  │  └─ 结果：HTTP 201 Created，id 为 reg-2\n│  │  └─ POST /api/audit\n│  │     └─ 结果：HTTP 202 Accepted\n│  └─ GET /api/registrations?reference=EVAL-RACE (回读)"
+	preservedUnrelatedChain := ensureDeliveryAttackChainTextFenceWithEvidence(unrelatedConcurrentRequest, requestPacket, true)
+	if !strings.Contains(preservedUnrelatedChain, "POST /api/audit") || !strings.Contains(preservedUnrelatedChain, "HTTP 202 Accepted") {
+		t.Fatalf("normalizer discarded an unrelated request or its result from the concurrent group:\n%s", preservedUnrelatedChain)
 	}
 	ambiguous := "普通用户\n   ├─ 请求 A 返回 200\n   └─ 请求 B 返回 403"
 	if got := ensureDeliveryAttackChainTextFence(ambiguous); got != "```text\n"+ambiguous+"\n```" {
