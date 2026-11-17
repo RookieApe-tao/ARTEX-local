@@ -2,6 +2,7 @@
 """准备、执行及整理固定报告样本评测。"""
 
 import argparse
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 import getpass
 import hashlib
@@ -357,6 +358,7 @@ def expand_go_policy(source):
         "DeliveryReportRuntimeGuidance",
         "DeliveryReportEvidenceGuidance",
         "DeliveryReportStyleGuidance",
+        "DeliveryReportTraceabilityGuidance",
     }
 
     def expand(name, parents):
@@ -560,6 +562,7 @@ def metrics(case, report):
         for block in re.findall(r"(?ms)^```http\s*\n(.*?)^```\s*$", burp_text)
         for match in HTTP_REQUEST_LINE.finditer(block)
     ]
+    burp_request_blocks = re.findall(r"(?ms)^```http\s*\n(.*?)^```\s*$", burp_text)
     burp_request_packet_present = bool(burp_request_packet_lines)
     is_http_case = case["kind"] == "http"
     has_http_request_evidence = is_http_case and any(
@@ -570,6 +573,39 @@ def metrics(case, report):
         for item in case["evidence"]
         for match in HTTP_REQUEST_LINE.finditer(item.get("request", ""))
     }
+    evidence_identity_headers = []
+    for item in case["evidence"]:
+        request = item.get("request", "")
+        request_line = re.search(
+            r"(?m)^([A-Z]+)\s+(\S+)\s+HTTP/\d(?:\.\d)?\s*$", request
+        )
+        if not request_line:
+            continue
+        identity_headers = tuple(
+            line.strip()
+            for line in request.replace("\r\n", "\n").splitlines()
+            if re.match(r"(?i)^(?:X-Eval-Actor|Authorization|Cookie|X-Auth-Token):", line.strip())
+        )
+        evidence_identity_headers.append(
+            (f"{request_line.group(1)} {request_line.group(2)}", identity_headers)
+        )
+    burp_identity_header_mismatches = []
+    for block in burp_request_blocks:
+        request_line = re.search(
+            r"(?m)^([A-Z]+)\s+(\S+)\s+HTTP/\d(?:\.\d)?\s*$", block
+        )
+        if not request_line:
+            continue
+        line = f"{request_line.group(1)} {request_line.group(2)}"
+        actual_headers = tuple(
+            header.strip()
+            for header in block.replace("\r\n", "\n").splitlines()
+            if re.match(r"(?i)^(?:X-Eval-Actor|Authorization|Cookie|X-Auth-Token):", header.strip())
+        )
+        expected_headers = [headers for evidence_line, headers in evidence_identity_headers if evidence_line == line]
+        if expected_headers and actual_headers not in expected_headers:
+            burp_identity_header_mismatches.append(line)
+    burp_identity_headers_match_evidence = bool(burp_request_blocks) and not burp_identity_header_mismatches
     burp_request_packet_matches_evidence = bool(burp_request_packet_lines) and all(
         line in evidence_request_lines for line in burp_request_packet_lines
     )
@@ -614,7 +650,7 @@ def metrics(case, report):
                     or Path(command.group(1)).name in evidence_command_names
                 ):
                     chain_shell_commands.append(node)
-    evidence_requests = set()
+    evidence_request_occurrences = []
     if case["kind"] == "http":
         for item in case["evidence"]:
             request_line = re.search(
@@ -622,8 +658,21 @@ def metrics(case, report):
                 item.get("request", ""),
             )
             if request_line:
-                evidence_requests.add(f"{request_line.group(1)} {request_line.group(2)}")
+                evidence_request_occurrences.append(
+                    f"{request_line.group(1)} {request_line.group(2)}"
+                )
+    evidence_requests = set(evidence_request_occurrences)
     missing_chain_requests = [item for item in chain_requests if item not in evidence_requests]
+    expected_request_counts = Counter(evidence_request_occurrences)
+    actual_request_counts = Counter(chain_requests)
+    request_occurrence_differences = {
+        request: {
+            "expected": expected_request_counts[request],
+            "actual": actual_request_counts[request],
+        }
+        for request in sorted(expected_request_counts.keys() | actual_request_counts.keys())
+        if expected_request_counts[request] != actual_request_counts[request]
+    }
     if case["kind"] == "http" and not chain_requests:
         missing_chain_requests.append("攻击链中没有 HTTP 请求节点")
     unmatched_shell_commands = []
@@ -637,7 +686,10 @@ def metrics(case, report):
                 suffix = node[len(expected):] if node.startswith(expected) else None
                 if node == expected or (
                     suffix is not None
-                    and suffix.startswith((" →", " ->", "：", " 结果："))
+                    and (
+                        suffix.startswith((" →", " ->", "：", " 结果："))
+                        or re.fullmatch(r"\s+[（(][^()（）]*[）)]", suffix)
+                    )
                 ):
                     remaining_commands.pop(index)
                     break
@@ -689,6 +741,12 @@ def metrics(case, report):
             not missing_chain_requests if case["kind"] == "http" else None
         ),
         "attack_chain_request_paths_not_found": missing_chain_requests,
+        "attack_chain_request_occurrences_match_evidence": (
+            not request_occurrence_differences if case["kind"] == "http" else None
+        ),
+        "attack_chain_request_occurrence_differences": (
+            request_occurrence_differences if case["kind"] == "http" else None
+        ),
         "attack_chain_shell_commands": (
             chain_shell_commands if case["kind"] == "non_http" else None
         ),
@@ -711,6 +769,14 @@ def metrics(case, report):
             burp_request_packet_matches_evidence
             if has_http_request_evidence
             else None
+        ),
+        "burp_request_identity_headers_match_evidence": (
+            burp_identity_headers_match_evidence
+            if has_http_request_evidence
+            else None
+        ),
+        "burp_request_identity_header_mismatches": (
+            burp_identity_header_mismatches if has_http_request_evidence else None
         ),
         "unclear_report_shorthand_found": unclear_report_shorthand_found,
         "semantic_quality": "未自动判定；原文匹配和字数不能证明结论正确或文字易读",

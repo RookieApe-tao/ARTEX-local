@@ -170,6 +170,8 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 		"根节点可用“验证请求组”仅作分组",
 		"每个 HTTP 请求或命令行都必须缩进并以 ├─ 或 └─ 开始",
 		"命令及路径必须逐字复制原始记录",
+		"request_occurrence_index 的每一条记录都必须在攻击链单独对应一个以完整 METHOD/path 开始的节点",
+		"X-Eval-Actor 是合成场景标记，不是凭据",
 		"HTTP METHOD/path 必须逐字复制 request_line_index",
 		"独立对照放在单独分支，不得接在主流程结果之后造成因果暗示",
 		"回读查询放在并发组之后",

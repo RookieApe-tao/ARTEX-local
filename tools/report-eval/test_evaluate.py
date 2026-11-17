@@ -1,6 +1,7 @@
 import argparse
 import importlib.util
 import io
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,11 +20,12 @@ class ReportEvaluationTest(unittest.TestCase):
             "const DeliveryReportRuntimeGuidance = `共享运行约定`\n\n"
             "const DeliveryReportEvidenceGuidance = `证据规则`\n\n"
             "const DeliveryReportStyleGuidance = `简短规则`\n\n"
-            "const DeliveryReportWritingRules = DeliveryReportRuntimeGuidance + DeliveryReportStyleGuidance + `新版写作规则`\n"
-            "const DeliveryReportDraftRules = DeliveryReportRuntimeGuidance + DeliveryReportEvidenceGuidance + DeliveryReportStyleGuidance + `JSON 草稿规则`\n"
+            "const DeliveryReportTraceabilityGuidance = `原文规则`\n\n"
+            "const DeliveryReportWritingRules = DeliveryReportRuntimeGuidance + DeliveryReportStyleGuidance + DeliveryReportTraceabilityGuidance + `新版写作规则`\n"
+            "const DeliveryReportDraftRules = DeliveryReportRuntimeGuidance + DeliveryReportEvidenceGuidance + DeliveryReportStyleGuidance + DeliveryReportTraceabilityGuidance + `JSON 草稿规则`\n"
         )
         self.assertEqual(EVAL.expand_go_policy(old), "旧版规则")
-        self.assertEqual(EVAL.expand_go_policy(current), "共享运行约定证据规则简短规则JSON 草稿规则")
+        self.assertEqual(EVAL.expand_go_policy(current), "共享运行约定证据规则简短规则原文规则JSON 草稿规则")
         for unsupported in (
             "const DeliveryReportWritingRules = unknown()\n",
             "const DeliveryReportWritingRules = `规则` + readSecret()\n",
@@ -192,6 +194,35 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertFalse(measured["attack_chain_single_root"])
         self.assertEqual(measured["attack_chain_disconnected_nodes"], ["POST /api/jobs/job-a/types"])
 
+    def test_attack_chain_request_occurrences_detect_missing_repeated_request(self):
+        case = EVAL.cases_by_id()["concurrency"]
+        request_lines = [
+            re.search(r"(?m)^([A-Z]+)\s+(\S+)\s+HTTP/\d(?:\.\d)?\s*$", item["request"])
+            for item in case["evidence"]
+        ]
+        nodes = [f"├─ {match.group(1)} {match.group(2)}" for match in request_lines]
+
+        def measured_for(chain_nodes):
+            report = "\n".join([
+                "# 并发登记问题",
+                "## 攻击链路",
+                "```text",
+                "验证请求组",
+                *chain_nodes,
+                "```",
+            ])
+            return EVAL.metrics(case, EVAL.attach_evidence(case, report))
+
+        complete = measured_for(nodes)
+        self.assertTrue(complete["attack_chain_request_occurrences_match_evidence"])
+        missing_one_submit = measured_for(nodes[:2] + nodes[3:])
+        self.assertTrue(missing_one_submit["attack_chain_request_paths_match_evidence"])
+        self.assertFalse(missing_one_submit["attack_chain_request_occurrences_match_evidence"])
+        self.assertEqual(
+            missing_one_submit["attack_chain_request_occurrence_differences"]["POST /api/registrations"],
+            {"expected": 4, "actual": 3},
+        )
+
     def test_non_http_attack_chain_commands_must_match_exact_evidence(self):
         case = EVAL.cases_by_id()["non-http"]
         headings = [
@@ -220,6 +251,20 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertTrue(valid["attack_chain_shell_commands_match_evidence"])
         self.assertFalse(valid["attack_chain_shell_commands_not_found"])
         self.assertFalse(valid["attack_chain_shell_commands_missing"])
+
+        annotated_chain = "\n".join([
+            "```text",
+            "本地文件权限验证",
+            f"├─ {commands[0]} （当前用户）",
+            *[f"├─ {command}" for command in commands[1:]],
+            "```",
+        ])
+        annotated = EVAL.metrics(
+            case, EVAL.attach_evidence(case, "\n".join(headings + [annotated_chain]))
+        )
+        self.assertTrue(annotated["attack_chain_shell_commands_match_evidence"])
+        self.assertFalse(annotated["attack_chain_shell_commands_not_found"])
+        self.assertFalse(annotated["attack_chain_shell_commands_missing"])
 
         concise_chain = "\n".join([
             "```text",
@@ -307,7 +352,16 @@ class ReportEvaluationTest(unittest.TestCase):
         )
         self.assertTrue(measured_with_packet["burp_request_packet_present"])
         self.assertTrue(measured_with_packet["burp_request_packet_matches_evidence"])
+        self.assertTrue(measured_with_packet["burp_request_identity_headers_match_evidence"])
         self.assertFalse(measured_with_packet["unclear_report_shorthand_found"])
+
+        forged_identity = with_packet.replace(
+            "X-Eval-Actor: user-a", "Authorization: Bearer <ATTACKER_TOKEN>"
+        )
+        measured_forged_identity = EVAL.metrics(
+            case, EVAL.attach_evidence(case, forged_identity)
+        )
+        self.assertFalse(measured_forged_identity["burp_request_identity_headers_match_evidence"])
 
         used_packet = with_packet.replace(
             "本次未在 Burp 中发送。建议复测请求（未发送）：",

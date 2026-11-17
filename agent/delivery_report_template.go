@@ -18,7 +18,7 @@ const DeliveryReportRuntimeGuidance = `
 
 const DeliveryReportChainGuidance = `
 
-攻击链只画一棵树。单一流程以材料中的页面或功能入口为根；没有页面记录时，以首个请求或命令为根。存在互相独立的对照请求时，根节点可用“验证请求组”仅作分组，不表示实际操作。每个 HTTP 请求或命令行都必须缩进并以 ├─ 或 └─ 开始，禁止把请求/命令放在左边界形成多个根。主流程按基线、操作、回读排列；独立对照放在单独分支，不得接在主流程结果之后造成因果暗示。真假条件并列；并发请求并列成组，回读查询放在并发组之后。HTTP METHOD/path 必须逐字复制 request_line_index，保留百分号编码，不补造。命令及路径必须逐字复制原始记录，不得改写成等价命令或简写路径。每个请求或命令的结果缩进在该节点下；相同请求只有证据明确时才合并并标次数；多条请求不等于并发。结果用自然语言说明业务状态，不得只写状态码/响应长度缩写或变量名（例如“200/1382B”“held=某值”）；若状态码或长度有必要，写清字段名称及它能证明的结果。结果简写且每项只写一次，不抄完整响应正文。`
+攻击链只画一棵树。单一流程以材料中的页面或功能入口为根；没有页面记录时，以首个请求或命令为根。存在互相独立的对照请求时，根节点可用“验证请求组”仅作分组，不表示实际操作。每个 HTTP 请求或命令行都必须缩进并以 ├─ 或 └─ 开始，禁止把请求/命令放在左边界形成多个根。主流程按基线、操作、回读排列；独立对照放在单独分支，不得接在主流程结果之后造成因果暗示。真假条件并列；并发请求并列成组，回读查询放在并发组之后。HTTP METHOD/path 必须逐字复制 request_line_index，保留百分号编码，不补造。若提供 request_occurrence_index，逐条保留每个请求用途、结果和重复次数；相同路径的不同请求仍是不同记录，不得漏项或合并结果。命令及路径必须逐字复制原始记录；若提供 command_line_index，以其中 command 字段为准。不得改写成等价命令、简写路径或添加括号注释；结果另列为该命令的子节点。合成请求中的 X-Eval-Actor 等自定义身份标记只表示样本标签，按原文保留，不得改写为 Cookie、Authorization 或 Token。每个请求或命令的结果缩进在该节点下；相同请求只有证据明确时才合并并标次数；多条请求不等于并发。结果用自然语言说明业务状态，不得只写状态码/响应长度缩写或变量名（例如“200/1382B”“held=某值”）；若状态码或长度有必要，写清字段名称及它能证明的结果。结果简写且每项只写一次，不抄完整响应正文。`
 
 const DeliveryReportEvidenceGuidance = `
 
@@ -30,7 +30,11 @@ const DeliveryReportEvidenceGuidance = `
 const DeliveryReportStyleGuidance = `
 
 用常见中文短句，正文尽量控制在 800 字以内，不硬截断。描述两句以内，定级依据一句，修复一句。发现过程写测试时间和最多四步；同类请求用“次数 × 结果”概括但保留各条件次数。失败与未验证项最多两句；Burp 复现最多两句说明文字，HTTP 报告必须附至少一段最小必要请求包，证据说明和复测标准各一句。攻击链只放必要入口、请求和结果。每项事实只放一个位置；每节不重复其他章节，不复述平台将附加的原始报文。保留复现所需的路径、关键结果、成立条件和未验证边界。不要写证据没有记载的工具、参数、时间或操作。`
-const DeliveryReportWritingRules = DeliveryReportRuntimeGuidance + DeliveryReportChainGuidance + DeliveryReportEvidenceGuidance + DeliveryReportStyleGuidance + `
+const DeliveryReportTraceabilityGuidance = `
+
+请求包按原始请求复制方法、路径、样本标记和必要请求头。X-Eval-Actor 是合成场景标记，不是凭据；原文没有 Authorization、Cookie 或 Token 时禁止新增这些请求头。request_occurrence_index 的每一条记录都必须在攻击链单独对应一个以完整 METHOD/path 开始的节点，结果写在该节点的子节点中。分组标题只能归类请求，不能代替请求节点，也不能承载某一条请求的结果。`
+
+const DeliveryReportWritingRules = DeliveryReportRuntimeGuidance + DeliveryReportChainGuidance + DeliveryReportEvidenceGuidance + DeliveryReportStyleGuidance + DeliveryReportTraceabilityGuidance + `
 
 报告头只保留一个一级标题和一行 CVSS 4.0 信息：
 # 系统或模块 功能或接口 缺陷：实际后果
@@ -67,7 +71,7 @@ CVSS 4.0：完整 Base 向量 评分 分数（等级）
 // Structured draft generation has a JSON contract, while Reporter writes a
 // complete Markdown report. Keeping those formats separate avoids competing
 // output instructions in the same system prompt.
-const DeliveryReportDraftRules = DeliveryReportRuntimeGuidance + DeliveryReportChainGuidance + DeliveryReportEvidenceGuidance + DeliveryReportStyleGuidance + `
+const DeliveryReportDraftRules = DeliveryReportRuntimeGuidance + DeliveryReportChainGuidance + DeliveryReportEvidenceGuidance + DeliveryReportStyleGuidance + DeliveryReportTraceabilityGuidance + `
 
 本次只生成交付报告草稿，不调用工具。平台生成标题、CVSS 行、五节标题和原始报文附件。只返回这个 JSON 对象，不加 Markdown 围栏或解释；字段值均为非空字符串：
 {"cvss_vector":"","description":"","remediation":"","test_process":"","attack_chain":"","discovery_path":""}
@@ -85,5 +89,5 @@ attack_chain 只写一棵短树。单一流程的根节点使用实际页面或�
 └─ 独立对照
    └─ POST /path (无身份)
       └─ 结果：...
-生成前读取 request_line_index：HTTP 节点原样复制 METHOD/path，不解码，不补造。命令及路径逐字复制原始记录，不改写成等价命令或简写路径。每个请求或命令的结果缩进在该节点下；并发请求并列成组，回读放在并发组之后。平台会添加 text 代码围栏，完整报文由平台附加。
+生成前读取 request_line_index：HTTP 节点原样复制 METHOD/path，不解码，不补造。若存在 request_occurrence_index，逐项覆盖每次请求及其对应结果；重复路径也不得漏写。若存在 command_line_index，命令行必须逐字复制 command 字段，不能追加说明文字；结果写在单独的子节点。合成请求中的 X-Eval-Actor 等自定义标记原样保留，不得替换成凭据。每个请求或命令的结果缩进在该节点下；并发请求并列成组，回读放在并发组之后。平台会添加 text 代码围栏，完整报文由平台附加。
 `

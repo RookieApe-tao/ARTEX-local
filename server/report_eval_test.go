@@ -210,6 +210,14 @@ func TestReportEvalPromptInputLabelsSyntheticMaterials(t *testing.T) {
 	if !strings.Contains(input["request_line_index"], "1. GET /api/files/file-a/download") {
 		t.Fatalf("request line index omitted the exact path: %q", input["request_line_index"])
 	}
+	if !strings.Contains(input["request_occurrence_index"], `"purpose":"请求他人文件"`) ||
+		!strings.Contains(input["request_occurrence_index"], `"request_line":"GET /api/files/file-a/download"`) ||
+		!strings.Contains(input["request_occurrence_index"], `"response_line":"HTTP/1.1 200 OK"`) {
+		t.Fatalf("request occurrence index omitted its purpose, path, or result: %q", input["request_occurrence_index"])
+	}
+	if !strings.Contains(input["request_packet"], "X-Eval-Actor: user-b") {
+		t.Fatal("synthetic identity marker must remain available verbatim for the Burp request")
+	}
 	if input["cvss_vector_hint"] != sample.Facts.CVSSVector {
 		t.Fatalf("CVSS hint=%q, want %q", input["cvss_vector_hint"], sample.Facts.CVSSVector)
 	}
@@ -230,6 +238,10 @@ func TestReportEvalPromptInputLabelsSyntheticMaterials(t *testing.T) {
 	if strings.Count(concurrencyInput["request_line_index"], "POST /api/registrations") != 4 {
 		t.Fatalf("request line index omitted repeated request count: %q", concurrencyInput["request_line_index"])
 	}
+	if strings.Count(concurrencyInput["request_occurrence_index"], `"request_line":"POST /api/registrations"`) != 4 ||
+		!strings.Contains(concurrencyInput["request_occurrence_index"], `"purpose":"第三次并发提交"`) {
+		t.Fatalf("request occurrence index did not preserve each repeated request: %q", concurrencyInput["request_occurrence_index"])
+	}
 	nonHTTP, nonHTTPMaterial, err := reporteval.Load("non-http")
 	if err != nil {
 		t.Fatal(err)
@@ -240,6 +252,16 @@ func TestReportEvalPromptInputLabelsSyntheticMaterials(t *testing.T) {
 	}
 	if nonHTTPInput["evidence_transport"] != "non_http" {
 		t.Fatalf("non-HTTP evidence transport=%q", nonHTTPInput["evidence_transport"])
+	}
+	for _, command := range []string{
+		"id",
+		"stat -c '%a %U %G %n' /tmp/report-eval/backups/customer-notes.txt",
+		"cat /tmp/report-eval/backups/customer-notes.txt",
+		"cat /tmp/report-eval/backups/private-notes.txt",
+	} {
+		if !strings.Contains(nonHTTPInput["command_line_index"], `"command":"`+command+`"`) {
+			t.Fatalf("command line index omitted the exact recorded command %q: %s", command, nonHTTPInput["command_line_index"])
+		}
 	}
 }
 
