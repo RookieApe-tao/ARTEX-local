@@ -40,7 +40,7 @@ UNCLEAR_REPORT_TERMS = (
     "sha256_16",
 )
 HTTP_REQUEST_LINE = re.compile(
-    r"(?mi)^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)[ \t]+\S+[ \t]+HTTP/\d(?:\.\d)?[ \t]*\r?$"
+    r"(?mi)^(?:[A-Z][A-Z0-9_-]*|<METHOD>)[ \t]+\S+[ \t]+HTTP/\d(?:\.\d)?[ \t]*\r?$"
 )
 STATUS_LENGTH_SHORTHAND = re.compile(r"\b\d{3}\s*/\s*\d+\s*[Bb]\b")
 INTERNAL_VALUE_SHORTHAND = re.compile(r"\b(?:held|readOnly|message|payload|sha256(?:_\d+)?)\s*=")
@@ -557,7 +557,8 @@ def metrics(case, report):
         for match in HTTP_REQUEST_LINE.finditer(block)
     ]
     burp_request_packet_present = bool(burp_request_packet_lines)
-    has_http_request_evidence = case["kind"] == "http" and any(
+    is_http_case = case["kind"] == "http"
+    has_http_request_evidence = is_http_case and any(
         item.get("request") for item in case["evidence"]
     )
     evidence_request_lines = {
@@ -698,9 +699,9 @@ def metrics(case, report):
             if case["kind"] == "non_http"
             else None
         ),
-        "burp_request_packet_required": has_http_request_evidence,
+        "burp_request_packet_required": is_http_case,
         "burp_request_packet_present": (
-            burp_request_packet_present if has_http_request_evidence else None
+            burp_request_packet_present if is_http_case else None
         ),
         "burp_request_packet_matches_evidence": (
             burp_request_packet_matches_evidence

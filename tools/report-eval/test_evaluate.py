@@ -309,6 +309,17 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertTrue(measured_with_packet["burp_request_packet_matches_evidence"])
         self.assertFalse(measured_with_packet["unclear_report_shorthand_found"])
 
+        used_packet = with_packet.replace(
+            "本次未在 Burp 中发送。建议复测请求（未发送）：",
+            "已在 Burp Repeater 中发送以下请求：",
+        )
+        measured_used_packet = EVAL.metrics(
+            case, EVAL.attach_evidence(case, used_packet)
+        )
+        self.assertTrue(measured_used_packet["burp_request_packet_required"])
+        self.assertTrue(measured_used_packet["burp_request_packet_present"])
+        self.assertTrue(measured_used_packet["burp_request_packet_matches_evidence"])
+
         mismatched_packet = with_packet.replace(
             "GET /api/jobs/job-a HTTP/1.1", "GET /api/jobs/job-b HTTP/1.1"
         )
@@ -316,6 +327,26 @@ class ReportEvaluationTest(unittest.TestCase):
             case, EVAL.attach_evidence(case, mismatched_packet)
         )
         self.assertFalse(measured_mismatch["burp_request_packet_matches_evidence"])
+
+        without_request_evidence = {
+            **case,
+            "evidence": [
+                {**item, "request": ""} for item in case["evidence"]
+            ],
+        }
+        incomplete_report = report.replace(
+            "本次未在 Burp 中发送，见建议步骤。",
+            "本次未在 Burp 中发送。建议复测请求（未发送）：\n\n"
+            "```http\n<METHOD> <PATH> HTTP/1.1\n"
+            "Host: <需从授权环境重新捕获>\n```",
+        )
+        measured_incomplete = EVAL.metrics(
+            without_request_evidence,
+            EVAL.attach_evidence(without_request_evidence, incomplete_report),
+        )
+        self.assertTrue(measured_incomplete["burp_request_packet_required"])
+        self.assertTrue(measured_incomplete["burp_request_packet_present"])
+        self.assertIsNone(measured_incomplete["burp_request_packet_matches_evidence"])
 
     def test_live_evaluation_only_accepts_loopback_and_renders_cvss_header(self):
         for url in ("https://example.com", "http://127.0.0.1.evil.test:8787", "http://user:placeholder@127.0.0.1:8787"):

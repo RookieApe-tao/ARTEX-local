@@ -313,6 +313,8 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"修复建议只写一项与已确认行为相符的主要措施",
 		"合成样本不能直接发往真实目标，也不能要求把样本值替换成真实凭据",
 		"建议复测请求（未发送）",
+		"所有 HTTP 报告都必须有 Burp Repeater 小节和至少一段足以复测核心结论的 HTTP 请求包，与 Burp 是否实际使用无关",
+		"材料没有 METHOD/path 时，代码块仍给出带占位符的请求行",
 		"任何真实 Authorization、Cookie、Token、会话标识或个人数据都改成用途明确的占位符",
 		"结果用自然语言说明业务状态，不得只写状态码/响应长度缩写或变量名",
 		"避免测试脚本内部说法和难懂缩写",
