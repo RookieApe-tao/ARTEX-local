@@ -27,19 +27,20 @@ func TestValidateDeliveryReportTemplate(t *testing.T) {
 		{"invalid header vector", strings.Replace(valid, vector, "CVSS:4.0/AV:N", 1), false},
 		{"attack chain without tree", strings.Replace(valid, "└─ 请求结果和业务影响未验证", "请求结果和业务影响未验证", 1), false},
 		{"attack chain has multiple roots", strings.Replace(valid, "└─ 请求结果和业务影响未验证", "另一个请求根节点\n└─ 请求结果和业务影响未验证", 1), false},
-		{"attack chain splits into multiple trees", strings.Replace(valid, "## 证据说明", "```text\n第二个根节点\n└─ 第二个结果\n```\n\n## 证据说明", 1), false},
+		{"attack chain splits into multiple trees", strings.Replace(valid, "## 测试过程", "```text\n第二个根节点\n└─ 第二个结果\n```\n\n## 测试过程", 1), false},
 		{"packet cannot supply attack chain", strings.Replace(valid, "## 攻击链路", "```http\n## 攻击链路\n```", 1), false},
 		{"comment cannot supply attack chain", strings.Replace(valid, "## 攻击链路", "<!--\n## 攻击链路\n-->", 1), false},
 		{"wrong section order", strings.Replace(valid, "## 修复建议", "## 测试过程", 1), false},
 		{"duplicate section", valid + "\n\n## 描述\n重复章节。", false},
 		{"empty remediation", strings.Replace(valid, "现有材料不足以定位具体实现，需结合源码确认修复位置。", " \t\n", 1), false},
-		{"unexpected nested heading", strings.Replace(valid, "### 发现过程与攻击思路", "### 非预期栏目\n\n### 发现过程与攻击思路", 1), false},
-		{"missing required subsection", strings.Replace(valid, "### 复测标准", "### 其他标题", 1), false},
+		{"unexpected nested heading", strings.Replace(valid, "测试时间：未记录", "### 非预期栏目\n\n测试时间：未记录", 1), false},
+		{"missing required section", strings.Replace(valid, "## Burp 复现", "## 其他标题", 1), false},
+		{"missing CVSS score", strings.Replace(valid, " 评分待复核", "", 1), false},
 		{"no forced time or tool ledger", valid, true},
-		{"timestamp wording is not a format gate", strings.Replace(valid, "协议未确认，Burp Repeater 复测未验证。", "测试时间：2026-11-01 10:00:00。协议和工具未记录。", 1), true},
-		{"Burp wording is reviewed as content", strings.Replace(valid, "协议未确认，Burp Repeater 复测未验证。", "协议未确认，HTTP 工具复测未验证。", 1), true},
-		{"non-HTTP Burp note", strings.Replace(valid, "协议未确认，Burp Repeater 复测未验证。", "Burp 不适用：本地命令验证。", 1), true},
-		{"repeated CVSS in body", strings.Replace(valid, "来源为本地合成测试记录，未采集原始请求和响应。", "CVSS 4.0："+vector, 1), false},
+		{"timestamp wording is not a format gate", strings.Replace(valid, "测试时间：未记录", "测试时间：2026-11-01 10:00:00。协议和工具未记录。", 1), true},
+		{"Burp wording is reviewed as content", strings.Replace(valid, "请求包供渗透测试工程师在授权目标中导入 Burp Repeater 复现或复测；请求包本身不代表已发送或验证。", "HTTP 工具请求包供授权测试人员使用。", 1), true},
+		{"non-HTTP Burp note", strings.Replace(valid, "```http\nGET /test HTTP/1.1\nHost: <需从授权账号重新捕获>\n```", "Burp 不适用：本地命令验证。", 1), true},
+		{"repeated CVSS in body", strings.Replace(valid, "重复请求的实际影响未验证。", "CVSS 4.0："+vector, 1), false},
 		{"risk rationale in body", strings.Replace(valid, "重复请求的实际影响未验证。", "当前材料支持低危判断，重复请求的其他影响未验证。", 1), true},
 		{"SQL remediation quality is reviewed as content", strings.Replace(strings.Replace(valid, "重复请求的实际影响未验证。", "SQL 注入结论待核实。", 1), "现有材料不足以定位具体实现，需结合源码确认修复位置。", "对 name 字段进行输入校验与过滤。", 1), true},
 		{"unsupported extraction wording is reviewed as content", strings.Replace(valid, "重复请求的实际影响未验证。", "真假响应差异只能说明响应不同，未取得数据。", 1), true},
@@ -157,6 +158,10 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	const previousV35Hash = "9d700f4f89005e55b28d163ce5eda116b5a0c81eb5d64c3563997a02ede09ae4"
 	if !reporterPromptHashNeedsTemplateUpgrade(previousV35Hash) {
 		t.Fatal("previous v35 stock prompt would describe synthetic files as sensitive assets")
+	}
+	const previousV36Hash = "b283bbd9f8f2a3ff6c94711491b0c20ca84391ee1610cab43f749e09e6b4949b"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV36Hash) {
+		t.Fatal("previous v36 stock prompt would retain the old delivery report structure")
 	}
 	if reporterPromptNeedsTemplateUpgrade(agent.ReporterDefaultPrompt) {
 		t.Fatal("current stock prompt should not be migrated")

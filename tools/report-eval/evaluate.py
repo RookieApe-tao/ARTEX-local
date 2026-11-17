@@ -19,14 +19,8 @@ from pathlib import Path
 
 
 CASE_DIR = Path(__file__).resolve().parent / "cases"
-HEADINGS = ["描述", "修复建议", "测试过程", "攻击链路", "证据说明"]
-SUBHEADINGS = [
-    ("描述", "定级依据"),
-    ("测试过程", "发现过程与攻击思路"),
-    ("测试过程", "失败尝试与未验证项"),
-    ("测试过程", "Burp 复现"),
-    ("证据说明", "复测标准"),
-]
+HEADINGS = ["描述", "攻击链路", "测试过程", "Burp 复现", "修复建议"]
+SUBHEADINGS = []
 DIMENSIONS = ["事实准确", "容易理解", "可以复现", "影响边界", "修复具体"]
 SHELL_COMMAND_NAMES = {
     "awk", "bash", "cat", "chmod", "chown", "curl", "cut", "docker",
@@ -48,7 +42,9 @@ INTERNAL_VALUE_SHORTHAND = re.compile(r"\b(?:held|readOnly|message|payload|sha25
 INSTRUCTION = (
     "只根据附带的离线合成材料写一份交付报告；不调用工具、不执行命令、不访问网络。"
     "遵循系统提示中的固定结构和事实边界，只写材料明确支持的事实，不补造测试动作、身份、影响或实现根因。"
-    "测试过程首行必须按 test_time_hint 写测试时间；缺失时写未记录。定级依据一两句，不逐项解释 CVSS 向量；修复只给一项有依据的措施，不列备选方案。"
+    "正文顺序固定为 CVSS 4.0 评分、描述、攻击链路、测试过程、Burp 复现、修复建议；只输出这六项，不添加其他章节或子标题。"
+    "测试过程首行必须按 test_time_hint 写测试时间；缺失时写未记录。评分依据自然写进描述，不逐项解释 CVSS 向量；修复只给一项有依据的措施，不列备选方案。"
+    "Burp 复现章节放置供渗透测试工程师导入 Burp Repeater 的请求包；请求包不是已发送或已验证的证据。"
     "每节用短句，正文目标不超过 800 字；不要扩写未测项目或复述证据，不删复现必需信息。合成样本不能当作真实测试，禁止建议替换样本身份、Host 或认证字段。"
     "不要重复请求、响应或终端原文；评测器会在正文后附加完整材料。"
 )
@@ -136,10 +132,10 @@ def report_from_draft(case, draft):
     sections = [
         f"# {case['name']}\n\n{cvss_line}",
         "## 描述\n\n" + draft["description"].strip(),
-        "## 修复建议\n\n" + draft["remediation"].strip(),
-        "## 测试过程\n\n" + draft["test_process"].strip(),
         "## 攻击链路\n\n" + draft["attack_chain"].strip(),
-        "## 证据说明\n\n" + draft["discovery_path"].strip(),
+        "## 测试过程\n\n" + draft["test_process"].strip(),
+        "## Burp 复现\n\n" + draft["burp_reproduction"].strip(),
+        "## 修复建议\n\n" + draft["remediation"].strip(),
     ]
     return "\n\n".join(sections) + "\n"
 
@@ -303,7 +299,7 @@ def run_live(args):
                 result = api_json(base_url, "/api/report-eval/" + urllib.parse.quote(cid, safe=""), method="POST", payload=None, token=token)
                 draft = result.get("draft")
                 if not isinstance(draft, dict) or not all(draft.get(key) for key in (
-                    "cvss_vector", "description", "remediation", "test_process", "attack_chain", "discovery_path",
+                    "cvss_vector", "description", "attack_chain", "test_process", "burp_reproduction", "remediation",
                 )):
                     raise ValueError("模型返回缺少必需报告字段")
                 report = report_from_draft(case, draft)
@@ -361,9 +357,12 @@ def expand_go_policy(source):
         "DeliveryReportWritingRules",
         "DeliveryReportDraftRules",
         "DeliveryReportRuntimeGuidance",
+        "DeliveryReportChainGuidance",
         "DeliveryReportEvidenceGuidance",
         "DeliveryReportStyleGuidance",
         "DeliveryReportTraceabilityGuidance",
+        "DeliveryReportFinalCheckGuidance",
+        "DeliveryReportOccurrenceGuidance",
     }
 
     def expand(name, parents):
@@ -544,8 +543,16 @@ def has_unnegated_phrase(text, phrase):
     offset = 0
     while (start := text.find(phrase, offset)) >= 0:
         end = start + len(phrase)
-        before = text[max(0, start - 36) : start]
-        after = text[end : end + 20]
+        clause_start = max(
+            (text.rfind(marker, 0, start) for marker in "。！？；\n"),
+            default=-1,
+        )
+        clause_end = min(
+            (position for marker in "。！？；\n" if (position := text.find(marker, end)) >= 0),
+            default=len(text),
+        )
+        before = text[clause_start + 1 : start]
+        after = text[end:clause_end].lstrip(" \t")
         if not any(marker in before for marker in negative_context) and not any(
             after.startswith(marker) for marker in negative_context
         ):
@@ -618,12 +625,16 @@ def metrics(case, report):
             subheadings.append((section, text))
     title_count = sum(1 for marks, _ in heading_rows if len(marks) == 1)
     unexpected_heading_levels = [len(marks) for marks, _ in heading_rows if len(marks) > 3]
+    cvss_rating_present = bool(re.search(
+        r"(?m)^CVSS 4\.0[：:].+评分(?:\s+(?:\d+(?:\.\d+)?\s*[（(][^）)]+[）)]|待复核)|待复核)\s*$",
+        report_body,
+    ))
     chain_match = re.search(
         r"(?ms)^## 攻击链路\s*\n(.*?)(?=^## |\Z)", report_body
     )
     chain_text = chain_match.group(1) if chain_match else ""
     burp_match = re.search(
-        r"(?ms)^### Burp 复现\s*\n(.*?)(?=^### |^## |\Z)", report_body
+        r"(?ms)^## Burp 复现\s*\n(.*?)(?=^## |\Z)", report_body
     )
     burp_text = burp_match.group(1) if burp_match else ""
     burp_request_packet_lines = [
@@ -633,6 +644,23 @@ def metrics(case, report):
     ]
     burp_request_blocks = re.findall(r"(?ms)^```http\s*\n(.*?)^```\s*$", burp_text)
     burp_request_packet_present = bool(burp_request_packet_lines)
+    burp_actual_send_claim_detected = False
+    if burp_match:
+        for phrase in (
+            "已通过 Burp 发送",
+            "已在 Burp 中发送",
+            "已在 Burp Repeater 中发送",
+            "本次在 Burp 中发送",
+            "实际在 Burp 中发送",
+            "Burp Repeater 实际发送",
+            "本次使用 Burp Repeater 发送",
+            "实际使用 Burp Repeater 发送",
+            "已通过 Burp Repeater 验证",
+            "已在 Burp 中验证",
+        ):
+            if has_unnegated_phrase(burp_text, phrase):
+                burp_actual_send_claim_detected = True
+                break
     is_http_case = case["kind"] == "http"
     is_non_http_case = case["kind"] == "non_http"
     is_synthetic = bool(case.get("synthetic"))
@@ -829,6 +857,7 @@ def metrics(case, report):
         "total_characters": len(report),
         "narrative_characters": narrative_characters,
         "narrative_within_800_characters": narrative_characters <= 800,
+        "cvss_rating_present": cvss_rating_present,
         "test_time_heading_present": test_time_line is not None,
         "test_time_matches_input": (
             expected_test_time in test_time_line
@@ -841,6 +870,7 @@ def metrics(case, report):
         "required_subheadings_ok": subheadings == SUBHEADINGS,
         "report_structure_ok": (
             title_count == 1
+            and cvss_rating_present
             and headings == HEADINGS
             and subheadings == SUBHEADINGS
             and not unexpected_heading_levels
@@ -879,6 +909,7 @@ def metrics(case, report):
             else None
         ),
         "burp_request_packet_required": is_http_case,
+        "burp_actual_send_claim_detected": burp_actual_send_claim_detected,
         "burp_request_packet_present": (
             burp_request_packet_present if is_http_case else None
         ),

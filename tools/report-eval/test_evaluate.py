@@ -85,10 +85,11 @@ class ReportEvaluationTest(unittest.TestCase):
             self.prepare(folder)
             draft = Path(temporary) / "draft.md"
             draft.write_text(
-                "# 示例下载线索\n\n## 描述\n待核实。\n\n### 定级依据\n现有材料不足。\n\n"
-                "## 修复\n先补证据。\n\n## 测试过程\n### 发现过程与攻击思路\n现有记录只有响应头。\n\n"
-                "### 失败尝试与未验证项\n响应正文未取得。\n\n## 攻击链路\n```text\n用户请求\n└─ 下载接口\n```\n\n"
-                "## 证据说明\n### Burp 复现\n未能重放。\n\n### 复测标准\n补齐完整响应后核实。\n",
+                "# 示例下载线索\n\nCVSS 4.0：CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N 评分待复核\n\n"
+                "## 描述\n待核实。\n\n## 攻击链路\n```text\n用户请求\n└─ GET /api/files/file-a/download\n```\n\n"
+                "## 测试过程\n测试时间：2026-11-01 10:00:00（北京时间）\n现有记录只有响应头，响应正文未取得。\n\n"
+                "## Burp 复现\n请求包供授权测试人员导入 Repeater。\n\n```http\nGET /api/files/file-a/download HTTP/1.1\nHost: report-eval.invalid\n```\n\n"
+                "## 修复建议\n先补齐响应证据后再确认修复措施。\n",
                 encoding="utf-8",
             )
             EVAL.collect(argparse.Namespace(
@@ -104,7 +105,8 @@ class ReportEvaluationTest(unittest.TestCase):
             evaluation = EVAL.read_json(folder / "report-evaluation.json")
             self.assertEqual(evaluation["cases"]["incomplete"]["status"], "人工审阅待完成")
             stored_draft = (folder / "drafts" / "incomplete.md").read_text(encoding="utf-8")
-            self.assertNotIn("GET /api/files/file-a/download HTTP/1.1", stored_draft)
+            self.assertNotIn("Content-Length: 48", stored_draft)
+            self.assertIn("Content-Length: 48", final)
 
     def test_collected_output_must_not_change_silently(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -155,17 +157,17 @@ class ReportEvaluationTest(unittest.TestCase):
         material = EVAL.cases()[0]
         report = chr(10).join([
             "# 漏洞名称",
+            "CVSS 4.0：CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N 评分待复核",
             "## 描述",
-            "### 定级依据",
-            "## 修复建议",
+            "观察结果和评分前提待复核。",
+            "## 攻击链路",
+            "```text", "普通用户", "└─ GET /api/test", "```",
             "## 测试过程",
             "测试时间：2026-11-01 10:00:00（北京时间）",
-            "### 发现过程与攻击思路",
-            "### 失败尝试与未验证项",
-            "### Burp 复现",
-            "## 攻击链路",
-            "## 证据说明",
-            "### 复测标准",
+            "核对请求和响应。",
+            "## Burp 复现",
+            "```http", "GET /api/test HTTP/1.1", "Host: example.invalid", "```",
+            "## 修复建议", "补齐证据后再确定修复措施。",
         ])
         report = EVAL.attach_evidence(material, report)
         measured = EVAL.metrics(material, report)
@@ -188,14 +190,12 @@ class ReportEvaluationTest(unittest.TestCase):
         case = EVAL.cases_by_id()["injection"]
         draft = {
             "cvss_vector": case["facts"]["cvss_vector"],
-            "description": "问题。\n### 定级依据\n测试依据。",
+            "description": "问题。评分前提需复核。",
             "remediation": "使用参数化查询。",
-            "test_process": "### 发现过程与攻击思路\n做对照测试。\n"
-            "### 失败尝试与未验证项\n字段值未读取。\n"
-            "### Burp 复现\n合成样本未用 Burp。",
+            "test_process": "测试时间：2026-11-01 10:00:00（北京时间）\n做对照测试，字段值未读取。",
+            "burp_reproduction": "合成样本请求供授权测试人员导入 Repeater。",
             "attack_chain": "```text\nGET /api/products?name=alpha\n"
             "├─ GET /api/products?name=alpha' AND 1=1-- → 返回1条\n```",
-            "discovery_path": "### 复测标准\n比较真假条件响应。",
         }
         report = EVAL.attach_evidence(case, EVAL.report_from_draft(case, draft))
         measured = EVAL.metrics(case, report)
@@ -205,10 +205,14 @@ class ReportEvaluationTest(unittest.TestCase):
     def test_attack_chain_metrics_detect_multiple_roots(self):
         case = EVAL.cases_by_id()["idor"]
         report = EVAL.attach_evidence(case, "\n".join([
-            "# 示例越权漏洞", "## 描述", "### 定级依据", "## 修复建议", "## 测试过程",
-            "### 发现过程与攻击思路", "### 失败尝试与未验证项", "### Burp 复现",
+            "# 示例越权漏洞",
+            "CVSS 4.0：" + case["facts"]["cvss_vector"] + " 评分待复核",
+            "## 描述", "越权行为待核实。",
             "## 攻击链路", "```text", "GET /api/jobs/job-a", "├─ 200 OK",
-            "POST /api/jobs/job-a/types", "└─ 200 OK", "```", "## 证据说明", "### 复测标准",
+            "POST /api/jobs/job-a/types", "└─ 200 OK", "```",
+            "## 测试过程", "测试时间：2026-11-01 10:00:00（北京时间）", "请求对照。",
+            "## Burp 复现", "请求包供授权人员导入 Repeater。",
+            "## 修复建议", "服务端校验资源归属。",
         ]))
         measured = EVAL.metrics(case, report)
         self.assertEqual(measured["attack_chain_root_count"], 2)
@@ -248,15 +252,19 @@ class ReportEvaluationTest(unittest.TestCase):
         case = EVAL.cases_by_id()["non-http"]
         headings = [
             "# 本地文件权限问题",
+            "CVSS 4.0：CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N 评分待复核",
             "## 描述",
-            "### 定级依据",
-            "## 修复建议",
+            "离线合成场景，未测试真实目标。读取到合成记录，真实影响未验证。",
+            "## 攻击链路",
+        ]
+        process_sections = [
             "## 测试过程",
             "测试时间：2026-11-01 10:00:00（北京时间）",
-            "### 发现过程与攻击思路",
-            "### 失败尝试与未验证项",
-            "### Burp 复现",
-            "## 攻击链路",
+            "检查文件权限并读取样本。",
+            "## Burp 复现",
+            "Burp 不适用：本次证据为本地命令或终端输出。",
+            "## 修复建议",
+            "将文件权限收紧至授权账号范围。",
         ]
         commands = [item["command"] for item in case["evidence"]]
         valid_chain = "\n".join([
@@ -265,10 +273,8 @@ class ReportEvaluationTest(unittest.TestCase):
             f"├─ {commands[0]} → 当前用户信息",
             *[f"├─ {command}" for command in commands[1:]],
             "```",
-            "## 证据说明",
-            "### 复测标准",
         ])
-        valid = EVAL.metrics(case, EVAL.attach_evidence(case, "\n".join(headings + [valid_chain])))
+        valid = EVAL.metrics(case, EVAL.attach_evidence(case, "\n".join(headings + [valid_chain] + process_sections)))
         self.assertTrue(valid["attack_chain_shell_commands_match_evidence"])
         self.assertFalse(valid["attack_chain_shell_commands_not_found"])
         self.assertFalse(valid["attack_chain_shell_commands_missing"])
@@ -281,7 +287,7 @@ class ReportEvaluationTest(unittest.TestCase):
             "```",
         ])
         annotated = EVAL.metrics(
-            case, EVAL.attach_evidence(case, "\n".join(headings + [annotated_chain]))
+            case, EVAL.attach_evidence(case, "\n".join(headings + [annotated_chain] + process_sections))
         )
         self.assertTrue(annotated["attack_chain_shell_commands_match_evidence"])
         self.assertFalse(annotated["attack_chain_shell_commands_not_found"])
@@ -294,7 +300,7 @@ class ReportEvaluationTest(unittest.TestCase):
             "```",
         ])
         concise = EVAL.metrics(
-            case, EVAL.attach_evidence(case, "\n".join(headings + [concise_chain]))
+            case, EVAL.attach_evidence(case, "\n".join(headings + [concise_chain] + process_sections))
         )
         self.assertTrue(concise["attack_chain_shell_commands_match_evidence"])
         self.assertEqual(concise["attack_chain_shell_commands_missing"], commands[:1])
@@ -309,7 +315,7 @@ class ReportEvaluationTest(unittest.TestCase):
             "```",
         ])
         inaccurate = EVAL.metrics(
-            case, EVAL.attach_evidence(case, "\n".join(headings + [inaccurate_chain]))
+            case, EVAL.attach_evidence(case, "\n".join(headings + [inaccurate_chain] + process_sections))
         )
         self.assertFalse(inaccurate["attack_chain_shell_commands_match_evidence"])
         self.assertEqual(
@@ -327,30 +333,22 @@ class ReportEvaluationTest(unittest.TestCase):
         case = EVAL.cases_by_id()["idor"]
         report = "\n".join([
             "# 作业权限问题",
+            "CVSS 4.0：" + case["facts"]["cvss_vector"] + " 评分待复核",
             "## 描述",
-            "观察到设置变化。",
-            "### 定级依据",
-            "影响已限定。",
-            "## 修复建议",
-            "校验资源归属。",
-            "## 测试过程",
-            "### 发现过程与攻击思路",
-            "测试时间：2026-11-01 10:00:00（北京时间）",
-            "步骤。",
-            "### 失败尝试与未验证项",
-            "其他影响未验证。",
-            "### Burp 复现",
-            "本次未在 Burp 中发送，见建议步骤。",
+            "观察到设置变化，影响已限定。",
             "## 攻击链路",
             "```text",
             "用户入口",
             "└─ GET /api/jobs/job-a",
             "   └─ 返回 200/1382B，held=alice",
             "```",
-            "## 证据说明",
-            "来源为离线样本。",
-            "### 复测标准",
-            "请求应被拒绝。",
+            "## 测试过程",
+            "测试时间：2026-11-01 10:00:00（北京时间）",
+            "核对请求和响应，其他影响未验证。",
+            "## Burp 复现",
+            "请求包尚未提供。",
+            "## 修复建议",
+            "校验资源归属。",
         ])
         measured = EVAL.metrics(case, EVAL.attach_evidence(case, report))
         self.assertTrue(measured["burp_request_packet_required"])
@@ -362,8 +360,8 @@ class ReportEvaluationTest(unittest.TestCase):
         )
 
         with_packet = report.replace(
-            "本次未在 Burp 中发送，见建议步骤。",
-            "本次未在 Burp 中发送。建议复测请求（未发送）：\n\n"
+            "请求包尚未提供。",
+            "以下请求包供渗透测试工程师在授权目标中导入 Burp Repeater 复现或复测；请求包本身不代表已通过 Burp 发送或验证。\n\n"
             "```http\nGET /api/jobs/job-a HTTP/1.1\n"
             "Host: report-eval.invalid\nX-Eval-Actor: user-a\n```",
         )
@@ -385,7 +383,7 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertFalse(measured_forged_identity["burp_request_identity_headers_match_evidence"])
 
         used_packet = with_packet.replace(
-            "本次未在 Burp 中发送。建议复测请求（未发送）：",
+            "以下请求包供渗透测试工程师在授权目标中导入 Burp Repeater 复现或复测；请求包本身不代表已通过 Burp 发送或验证。",
             "已在 Burp Repeater 中发送以下请求：",
         )
         measured_used_packet = EVAL.metrics(
@@ -394,6 +392,7 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertTrue(measured_used_packet["burp_request_packet_required"])
         self.assertTrue(measured_used_packet["burp_request_packet_present"])
         self.assertTrue(measured_used_packet["burp_request_packet_matches_evidence"])
+        self.assertTrue(measured_used_packet["burp_actual_send_claim_detected"])
 
         mismatched_packet = with_packet.replace(
             "GET /api/jobs/job-a HTTP/1.1", "GET /api/jobs/job-b HTTP/1.1"
@@ -410,8 +409,8 @@ class ReportEvaluationTest(unittest.TestCase):
             ],
         }
         incomplete_report = report.replace(
-            "本次未在 Burp 中发送，见建议步骤。",
-            "本次未在 Burp 中发送。建议复测请求（未发送）：\n\n"
+            "请求包尚未提供。",
+            "以下请求包供渗透测试工程师在授权目标中导入 Burp Repeater 复现或复测；请求包本身不代表已通过 Burp 发送或验证。\n\n"
             "```http\n<METHOD> <PATH> HTTP/1.1\n"
             "Host: <需从授权环境重新捕获>\n```",
         )
@@ -427,36 +426,28 @@ class ReportEvaluationTest(unittest.TestCase):
         case = EVAL.cases_by_id()["session"]
         report = "\n".join([
             "# 退出后会话仍有效",
+            "CVSS 4.0：" + case["facts"]["cvss_vector"] + " 评分待复核",
             "## 描述",
-            "样本观察到退出后仍能访问用户接口。",
-            "### 定级依据",
-            "真实数据影响待复核。",
-            "## 修复建议",
-            "退出时使当前会话立即失效。",
-            "## 测试过程",
-            "测试时间：2026-11-01 10:00:00（北京时间）",
-            "### 发现过程与攻击思路",
-            "使用同一会话请求退出前后接口。",
-            "### 失败尝试与未验证项",
-            "最长有效时间未验证。",
-            "### Burp 复现",
-            "离线合成请求未发送到真实目标。",
-            "```http",
-            "GET /api/me HTTP/1.1",
-            "Host: report-eval.invalid",
-            "Cookie: [REDACTED]",
-            "Content-Length: 0",
-            "```",
+            "样本观察到退出后仍能访问用户接口，真实数据影响待复核。",
             "## 攻击链路",
             "```text",
             "会话访问",
             "└─ GET /api/me",
             "   └─ 返回合成用户记录",
             "```",
-            "## 证据说明",
-            "证据来自离线合成报文。",
-            "### 复测标准",
-            "退出后重放应被拒绝。",
+            "## 测试过程",
+            "测试时间：2026-11-01 10:00:00（北京时间）",
+            "使用同一会话请求退出前后接口，最长有效时间未验证。",
+            "## Burp 复现",
+            "离线合成请求样例，不能直接发送到真实目标。请求包供授权测试人员导入 Repeater，不代表已发送或验证。",
+            "```http",
+            "GET /api/me HTTP/1.1",
+            "Host: report-eval.invalid",
+            "Cookie: [REDACTED]",
+            "Content-Length: 0",
+            "```",
+            "## 修复建议",
+            "退出时使当前会话立即失效。",
         ])
         report = EVAL.attach_evidence(case, report)
         measured = EVAL.metrics(case, report)
@@ -475,32 +466,22 @@ class ReportEvaluationTest(unittest.TestCase):
         case = EVAL.cases_by_id()["non-http"]
         report = "\n".join([
             "# 本地文件权限问题",
-            "CVSS 4.0：" + case["facts"]["cvss_vector"],
+            "CVSS 4.0：" + case["facts"]["cvss_vector"] + " 评分待复核",
             "## 描述",
-            "读取到固定合成记录，未验证真实数据影响。",
-            "离线合成场景，未测试真实目标。",
-            "### 定级依据",
-            "向量中的影响是假设，实际影响待复核。",
-            "## 修复建议",
-            "将备份文件权限收紧至仅授权账号可读。",
-            "## 测试过程",
-            "测试时间：2026-11-01 10:00:00（北京时间）",
-            "### 发现过程与攻击思路",
-            "使用本地命令检查文件权限并读取样本。",
-            "### 失败尝试与未验证项",
-            "其他目录未检查。",
-            "### Burp 复现",
-            "Burp 不适用：本次通过本地命令验证。",
+            "离线合成场景，未测试真实目标。读取到固定合成记录，未验证真实数据影响；向量中的影响为评分假设。",
             "## 攻击链路",
             "```text",
             "本地终端",
             "└─ cat /tmp/report-eval/backups/customer-notes.txt",
             "   └─ 读取到合成记录",
             "```",
-            "## 证据说明",
-            "材料来自离线合成终端记录。",
-            "### 复测标准",
-            "仅授权账号可读取备份。",
+            "## 测试过程",
+            "测试时间：2026-11-01 10:00:00（北京时间）",
+            "使用本地命令检查文件权限并读取样本。其他目录未检查。",
+            "## Burp 复现",
+            "Burp 不适用：本次通过本地命令验证。",
+            "## 修复建议",
+            "将备份文件权限收紧至仅授权账号可读。",
         ])
         measured = EVAL.metrics(case, report)
         self.assertTrue(measured["non_http_burp_not_applicable"])
@@ -528,7 +509,7 @@ class ReportEvaluationTest(unittest.TestCase):
         )
         self.assertTrue(measured["synthetic_target_scope_present"])
 
-        without_scope = report.replace("离线合成场景，未测试真实目标。\n", "")
+        without_scope = report.replace("离线合成场景，未测试真实目标。", "")
         self.assertFalse(EVAL.metrics(case, without_scope)["synthetic_target_scope_present"])
 
         fabricated_packet = report.replace(
@@ -585,11 +566,11 @@ class ReportEvaluationTest(unittest.TestCase):
         case = EVAL.cases_by_id()["idor"]
         draft = {
             "cvss_vector": case["facts"]["cvss_vector"],
-            "description": "问题说明\n### 定级依据\n评级依据。",
+            "description": "问题说明，评分依据待复核。",
+            "attack_chain": "```text\n普通用户\n└─ 请求接口\n   └─ 观察结果\n```",
+            "test_process": "测试时间：2026-11-01 10:00:00（北京时间）\n复现步骤。批量编号未验证。",
+            "burp_reproduction": "请求包供授权测试人员导入 Repeater。",
             "remediation": "服务端校验当前用户与作业归属。",
-            "test_process": "### 发现过程与攻击思路\n复现步骤。\n### 失败尝试与未验证项\n批量编号未验证。",
-            "attack_chain": "```text\n普通用户\n└─ 修改接口\n   └─ 状态变化\n```",
-            "discovery_path": "### Burp 复现\n使用 Repeater。\n### 复测标准\n请求应被拒绝。",
         }
         report = EVAL.report_from_draft(case, draft)
         self.assertIn("CVSS 4.0：" + case["facts"]["cvss_vector"], report)
@@ -643,14 +624,24 @@ class ReportEvaluationTest(unittest.TestCase):
                         {"stop_reason": "end_turn", "content_block_types": ["text"], "output_tokens": 17},
                     )
                 case = EVAL.cases_by_id()[case_id]
+                if case["kind"] == "non_http":
+                    burp_reproduction = "Burp 不适用：本次证据为本地命令或终端输出。"
+                else:
+                    request_packet = next(item["request"] for item in case["evidence"] if item.get("request"))
+                    burp_reproduction = (
+                        "请求包供渗透测试工程师在授权目标中导入 Burp Repeater 复现或复测；"
+                        "请求包本身不代表已通过 Burp 发送或验证。\n```http\n"
+                        + request_packet.strip()
+                        + "\n```"
+                    )
                 return {
                     "draft": {
                         "cvss_vector": case["facts"]["cvss_vector"],
-                        "description": "问题说明。\n### 定级依据\n依据合成材料中的观察。",
-                        "remediation": "在服务端落实对应的业务校验。",
-                        "test_process": "### 发现过程与攻击思路\n按样本材料核对。\n### 失败尝试与未验证项\n未覆盖的边界仍待验证。",
+                        "description": "离线合成场景，未测试真实目标。问题说明，评分依据待复核。",
                         "attack_chain": "```text\n普通用户\n└─ 请求对应接口\n   └─ 观察到样本结果\n```",
-                        "discovery_path": "### Burp 复现\n将样本请求放入 Repeater。\n### 复测标准\n按修复后的预期结果核对。",
+                        "test_process": "测试时间：2026-11-01 10:00:00（北京时间）\n按样本材料核对，未覆盖的边界仍待验证。",
+                        "burp_reproduction": burp_reproduction,
+                        "remediation": "在服务端落实对应的业务校验。",
                     },
                     "usage": {"input_tokens": 10, "output_tokens": 20},
                     "duration_ms": 100,

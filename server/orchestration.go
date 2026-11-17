@@ -436,13 +436,13 @@ const previousFindingReportToolDescriptionTemplateV5 = "为已登记的漏洞一
 const previousDeliveryReportSaveGuidanceV6 = "交付报告须包含一个漏洞名称一级标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：描述、修复建议、测试过程、攻击链路、证据说明。不要添加三级标题或重复栏目。测试过程须说明工具、参数、实际结果、判据、失败尝试与未验证项；HTTP 问题须写明 Burp Repeater 的实际使用状态和复现步骤，非 HTTP 问题说明 Burp 不适用。绑定的请求和响应由 ARTEX 原文附加，不要重复粘贴。用简短中文写清问题、影响和修复。"
 const previousFindingReportToolDescriptionTemplateV6 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + previousDeliveryReportSaveGuidanceV6 + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
-const previousDeliveryReportSaveGuidanceV7 = "交付报告须包含一个漏洞名称一级标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：" + agent.DeliveryReportSectionOrder + "。不要添加三级标题或重复栏目。测试过程须说明时间、实际工具与参数、结果、判据、失败尝试与未验证项；缺少时间或工具记录时分别写“测试时间：未记录”或“执行工具：未记录”。HTTP 问题须写明 Burp Repeater 的实际使用状态和复现步骤，非 HTTP 问题说明 Burp 不适用。已绑定 HTTP 请求和响应由 ARTEX 原文附加，不要重复粘贴。用简短中文写清问题、影响和修复。"
+const previousDeliveryReportSaveGuidanceV7 = "交付报告须包含一个漏洞名称一级标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：描述、修复建议、测试过程、攻击链路、证据说明。不要添加三级标题或重复栏目。测试过程须说明时间、实际工具与参数、结果、判据、失败尝试与未验证项；缺少时间或工具记录时分别写“测试时间：未记录”或“执行工具：未记录”。HTTP 问题须写明 Burp Repeater 的实际使用状态和复现步骤，非 HTTP 问题说明 Burp 不适用。已绑定 HTTP 请求和响应由 ARTEX 原文附加，不要重复粘贴。用简短中文写清问题、影响和修复。"
 const previousFindingReportToolDescriptionTemplateV7 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + previousDeliveryReportSaveGuidanceV7 + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
 const previousDeliveryReportSaveGuidanceV8 = "交付报告须包含一个漏洞名称一级标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：描述、修复建议、测试过程、攻击链路、证据说明。不要添加三级标题或重复栏目。测试过程必须各有一行“测试时间：”和“执行工具：”；没有记录时分别写“未记录”。还须说明参数、结果、判据、失败尝试与未验证项。HTTP 问题须写明 Burp Repeater 的实际使用状态；非 HTTP 问题只说明 Burp 不适用；协议未确认时写“协议未确认，Burp Repeater 复测未验证”，不猜协议也不写复现步骤。合成身份标记不是凭证，不要抄写或建议替换。已绑定 HTTP 请求和响应由 ARTEX 原文附加，不要重复粘贴。用简短中文写清问题、影响和修复。"
 const previousFindingReportToolDescriptionTemplateV8 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + previousDeliveryReportSaveGuidanceV8 + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
-const previousDeliveryReportSaveGuidanceV9 = "以下结构和写作要求只适用于交付报告字段；详细报告仍保留原有章节和完整台账。交付报告须包含一个漏洞名称标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：" + agent.DeliveryReportSectionOrder + "。描述含“定级依据”；测试过程含“发现过程与攻击思路”“失败尝试与未验证项”“Burp 复现”；证据说明含“复测标准”。正文尽量简短，通常不超过 800 字；复杂案例可超过，不得删掉关键证据来凑长度。测试时间按记录换算为北京时间，缺失时写“未记录”。HTTP 问题说明 Burp Repeater 的实际使用情况或复测步骤。ARTEX 会附加完整原始请求和响应，不要在正文重复转述。"
+const previousDeliveryReportSaveGuidanceV9 = "以下结构和写作要求只适用于交付报告字段；详细报告仍保留原有章节和完整台账。交付报告须包含一个漏洞名称标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：描述、修复建议、测试过程、攻击链路、证据说明。描述含“定级依据”；测试过程含“发现过程与攻击思路”“失败尝试与未验证项”“Burp 复现”；证据说明含“复测标准”。正文尽量简短，通常不超过 800 字；复杂案例可超过，不得删掉关键证据来凑长度。测试时间按记录换算为北京时间，缺失时写“未记录”。HTTP 问题说明 Burp Repeater 的实际使用情况或复测步骤。ARTEX 会附加完整原始请求和响应，不要在正文重复转述。"
 const previousFindingReportToolDescriptionTemplateV9 = "为已登记的漏洞一次写入/更新【详细报告】和【交付报告】(Markdown 全文，整段覆盖)。finding_id 传 finding_node_id（report_finding 第一行的数字）。" + previousDeliveryReportSaveGuidanceV9 + "保存时 ARTEX 会在证据说明内成对附加全部已绑定 HTTP 请求和响应。正文按材料用途称呼，不抄写内部证据 ID 或重复报文。cvss_vector 提供完整 CVSS 4.0 Base 向量。"
 
 const previousDeliveryReportSaveGuidanceV10 = `以下结构和写作要求只适用于交付报告字段；详细报告仍保留原有章节和完整台账。交付报告须包含一个漏洞名称标题、一行 CVSS 4.0 信息，并按顺序使用二级标题：描述、修复建议、测试过程、攻击链路、证据说明。描述含“定级依据”；测试过程含“发现过程与攻击思路”“失败尝试与未验证项”“Burp 复现”；证据说明含“复测标准”。正文尽量简短，通常不超过 800 字；复杂案例可超过，不得删掉关键证据来凑长度。测试时间按记录换算为北京时间，缺失时写“未记录”。HTTP 问题说明 Burp Repeater 的实际使用情况或复测步骤。ARTEX 会附加完整原始请求和响应，不要在正文重复转述。
@@ -633,6 +633,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.upgradeReporterDeliveryTemplateV34() // 明确合成范围并整理 Burp 请求与攻击链
 	s.upgradeReporterDeliveryTemplateV35() // 固定攻击链分组节点，避免出现第二个根
 	s.upgradeReporterDeliveryTemplateV36() // 避免把合成文件称为真实敏感资产
+	s.upgradeReporterDeliveryTemplateV37() // 固定交付报告六项结构并提供 Burp 复现请求包
 	s.upgradeReporterTriggerMessage()      // 老库触发消息同步报告版式与链路图规范
 	s.upgradeReporterTriggerMessageV11()   // 移除触发消息中重复的报告写作规则
 	s.seedFindingTrafficTools()            // 增加可选证据参数及只读证据工具，保留用户配置
@@ -832,6 +833,8 @@ func reporterPromptHashNeedsTemplateUpgrade(hash string) bool {
 	case "487018396adc75c029f8864b55ca8d17a6b612376ea75eace5dd88a31ae15016": // v34 合成范围与攻击链默认提示词
 		return true
 	case "9d700f4f89005e55b28d163ce5eda116b5a0c81eb5d64c3563997a02ede09ae4": // v35 合成数据敏感资产边界默认提示词
+		return true
+	case "b283bbd9f8f2a3ff6c94711491b0c20ca84391ee1610cab43f749e09e6b4949b": // v36 六项交付报告结构升级前的默认提示词
 		return true
 	default:
 		return false
@@ -1523,6 +1526,39 @@ func (s *Server) upgradeReporterDeliveryTemplateV36() {
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存合成文件敏感资产边界迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV37() {
+	const flag = "reporter_prompt_delivery_template_v37"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取六项交付报告模板迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新六项交付报告模板失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已更新为六项交付报告结构")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存六项交付报告模板迁移标记失败: %v", err)
 	}
 }
 

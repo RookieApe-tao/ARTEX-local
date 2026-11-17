@@ -55,15 +55,15 @@ type deliveryReportAccess struct {
 }
 
 type deliveryReportDraft struct {
-	CVSSVector      string `json:"cvss_vector"`
-	Description     string `json:"description"`
-	Remediation     string `json:"remediation"`
-	TestProcess     string `json:"test_process"`
-	AttackChain     string `json:"attack_chain"`
-	DiscoveryPath   string `json:"discovery_path"`
-	RequestPacket   string `json:"request_packet"`
-	ResponsePacket  string `json:"response_packet"`
-	EvidenceVersion int64  `json:"evidence_version"`
+	CVSSVector       string `json:"cvss_vector"`
+	Description      string `json:"description"`
+	AttackChain      string `json:"attack_chain"`
+	TestProcess      string `json:"test_process"`
+	BurpReproduction string `json:"burp_reproduction"`
+	Remediation      string `json:"remediation"`
+	RequestPacket    string `json:"request_packet"`
+	ResponsePacket   string `json:"response_packet"`
+	EvidenceVersion  int64  `json:"evidence_version"`
 }
 
 func (s *Server) deliveryReportAccess(w http.ResponseWriter, r *http.Request) (deliveryReportAccess, bool) {
@@ -427,146 +427,59 @@ func stripRedundantDeliveryDraftSubheading(content, section string) string {
 	return strings.TrimSpace(strings.Join(result, "\n"))
 }
 
-func ensureDeliveryBurpRequestFence(content string) string {
-	lines := strings.Split(content, "\n")
-	sectionStart, sectionEnd := -1, len(lines)
-	for index, line := range lines {
-		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-		if sectionStart < 0 {
-			if trimmed == "### Burp 复现" {
-				sectionStart = index
-			}
-			continue
+func ensureDeliveryBurpSection(content, evidencePacket, evidenceTransport string, synthetic bool) string {
+	packet := deliveryBurpEvidenceRequest(evidencePacket)
+	isNonHTTP := evidenceTransport == "non-http" || evidenceTransport == "non_http"
+	if isNonHTTP || (evidenceTransport != "http" && packet == "" && strings.Contains(content, "Burp 不适用")) {
+		return ensureDeliveryNonHTTPBurpSection()
+	}
+
+	var section strings.Builder
+	if synthetic {
+		section.WriteString("离线合成请求样例，不能直接发送到真实目标。\n")
+	}
+	section.WriteString("以下请求包供渗透测试工程师在授权目标中导入 Burp Repeater 复现或复测，不代表已通过 Burp 发送或验证。\n")
+	if packet == "" {
+		packet = "<METHOD> <PATH> HTTP/1.1\r\nHost: <需从授权账号重新捕获>"
+		section.WriteString("原始请求未完整留存；此模板不能直接发送，缺失字段需从授权账号重新捕获。\n")
+	} else {
+		var missingHost bool
+		packet, missingHost = deliveryBurpEnsureHostHeader(packet)
+		if missingHost {
+			section.WriteString("原始请求未记录 Host；当前请求含占位符，需从授权账号重新捕获后再发送。\n")
 		}
-		if strings.HasPrefix(trimmed, "### ") || strings.HasPrefix(trimmed, "## ") {
-			sectionEnd = index
+	}
+	section.WriteString("```http\n")
+	section.WriteString(packet)
+	section.WriteString("\n```")
+	return strings.TrimSpace(section.String())
+}
+
+func deliveryBurpEnsureHostHeader(packet string) (string, bool) {
+	lines := strings.Split(packet, "\r\n")
+	if len(lines) == 1 {
+		lines = strings.Split(packet, "\n")
+	}
+	for index := 1; index < len(lines); index++ {
+		if strings.TrimSpace(lines[index]) == "" {
 			break
 		}
-	}
-	if sectionStart < 0 {
-		return content
-	}
-
-	insideFence := false
-	fenceStart := -1
-	requestInFence := false
-	requestLine := -1
-	for index := sectionStart + 1; index < sectionEnd; index++ {
-		trimmed := strings.TrimSpace(strings.TrimSuffix(lines[index], "\r"))
-		if strings.HasPrefix(trimmed, "```") {
-			if !insideFence {
-				insideFence = true
-				fenceStart = index
-				requestInFence = false
-				continue
-			}
-			if requestInFence {
-				if strings.TrimSpace(strings.TrimSuffix(lines[fenceStart], "\r")) != "```http" {
-					lines[fenceStart] = "```http"
-				}
-				return strings.Join(lines, "\n")
-			}
-			insideFence = false
-			fenceStart = -1
+		name, value, ok := strings.Cut(lines[index], ":")
+		if !ok || !strings.EqualFold(strings.TrimSpace(name), "Host") {
 			continue
 		}
-		if !isDeliveryHTTPRequestLine(trimmed) {
-			continue
+		if strings.TrimSpace(value) != "" && !strings.Contains(value, "需从授权账号重新捕获") {
+			return packet, false
 		}
-		if insideFence {
-			requestInFence = true
-		} else if requestLine < 0 {
-			requestLine = index
-		}
+		lines[index] = "Host: <需从授权账号重新捕获>"
+		return strings.Join(lines, "\r\n"), true
 	}
-	if requestLine < 0 {
-		return strings.Join(lines, "\n")
-	}
-
-	packetEnd := deliveryRawHTTPRequestEnd(lines, requestLine, sectionEnd)
-	formatted := make([]string, 0, len(lines)+2)
-	formatted = append(formatted, lines[:requestLine]...)
-	formatted = append(formatted, "```http")
-	formatted = append(formatted, lines[requestLine:packetEnd]...)
-	formatted = append(formatted, "```")
-	formatted = append(formatted, lines[packetEnd:]...)
-	return strings.Join(formatted, "\n")
+	lines = append(lines[:1], append([]string{"Host: <需从授权账号重新捕获>"}, lines[1:]...)...)
+	return strings.Join(lines, "\r\n"), true
 }
 
-func ensureDeliveryBurpSection(content, evidencePacket, evidenceTransport string, synthetic bool) string {
-	if evidenceTransport == "non-http" || evidenceTransport == "non_http" {
-		return ensureDeliveryNonHTTPBurpSection(content)
-	}
-
-	isHTTP := evidenceTransport == "http" || containsDeliveryHTTPRequest(evidencePacket) || containsDeliveryHTTPRequest(content)
-	if !isHTTP {
-		return content
-	}
-
-	if !strings.Contains(content, "### Burp 复现") {
-		lines := strings.Split(content, "\n")
-		insertAt := -1
-		for index, line := range lines {
-			trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-			if strings.Contains(trimmed, "Burp 不适用") {
-				lines[index] = "本次未在 Burp 中发送；以下为建议复测请求（未发送）："
-				insertAt = index
-				break
-			}
-		}
-		if insertAt < 0 {
-			if blockStart, _, ok := deliveryHTTPRequestBlockRange(content); ok {
-				insertAt = blockStart
-			}
-		}
-		if insertAt >= 0 {
-			lines = append(lines[:insertAt], append([]string{"### Burp 复现"}, lines[insertAt:]...)...)
-			content = strings.Join(lines, "\n")
-		} else {
-			content = strings.TrimSpace(content) + "\n\n### Burp 复现\n材料未记录是否实际在 Burp Repeater 中发送；以下为建议复测请求（未发送）。"
-		}
-	}
-
-	sectionStart, sectionEnd := deliveryBurpSectionRange(content)
-	if sectionStart < 0 {
-		return content
-	}
-	section := strings.Join(strings.Split(content, "\n")[sectionStart+1:sectionEnd], "\n")
-	packet := deliveryBurpEvidenceRequest(evidencePacket)
-	packetMissing := packet == ""
-	if packetMissing {
-		packet = "<METHOD> <PATH> HTTP/1.1\r\nHost: <需从授权账号重新捕获>"
-	}
-	section = deliveryBurpStatusLine(section, synthetic) + "\n"
-	if packetMissing {
-		section += "材料未包含可复用的原始请求字段；此模板不能直接发送，需重新捕获完整请求。\n"
-	}
-	section += "```http\n" + packet + "\n```"
-	content = replaceDeliveryBurpSection(content, sectionStart, sectionEnd, section)
-	return ensureDeliveryBurpRequestFence(content)
-}
-
-func deliveryBurpStatusLine(section string, synthetic bool) string {
-	if synthetic {
-		return "离线合成请求未发送到真实目标；以下是 Burp Repeater 请求样例。"
-	}
-	if strings.Contains(section, "本次未在 Burp") || strings.Contains(section, "未实际使用 Burp") ||
-		strings.Contains(section, "建议复测请求") || strings.Contains(section, "未发送") || strings.Contains(section, "Burp 不适用") {
-		return "本次未在 Burp Repeater 中发送；以下为建议复测请求（未发送）。"
-	}
-	if strings.Contains(section, "本次使用 Burp") || strings.Contains(section, "本次在 Burp") || strings.Contains(section, "实际在 Burp") {
-		return "本次使用 Burp Repeater 发送了以下请求。"
-	}
-	return "材料未记录 Burp Repeater 发送情况；以下请求包可用于复测。"
-}
-
-func ensureDeliveryNonHTTPBurpSection(content string) string {
-	const body = "Burp 不适用：本次通过本地命令或终端记录验证。"
-	start, end := deliveryBurpSectionRange(content)
-	if start < 0 {
-		return strings.TrimSpace(content) + "\n\n### Burp 复现\n" + body
-	}
-	return replaceDeliveryBurpSection(content, start, end, body)
+func ensureDeliveryNonHTTPBurpSection() string {
+	return "Burp 不适用：本次证据为本地命令或终端输出。"
 }
 
 func ensureDeliverySyntheticBoundary(content string) string {
@@ -677,45 +590,32 @@ func normalizeDeliverySyntheticTextLine(content string) string {
 	return content
 }
 
-func ensureDeliveryDraftRatingHeading(content string) string {
-	const heading = "### 定级依据"
-	if strings.Contains(content, heading) {
-		return content
+func ensureDeliveryDraftTestTime(content, testTimeHint string) string {
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	testTime := strings.TrimSpace(testTimeHint)
+	if testTime == "" || testTime == "测试时间未记录" {
+		testTime = "未记录"
 	}
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return heading + "\n定级依据未记录；CVSS 影响项需结合已验证证据复核。"
-	}
-	for _, marker := range []string{"VC:", "CVSS", "评分", "定级"} {
-		position := strings.Index(content, marker)
-		if position < 0 {
-			continue
-		}
-		boundary := strings.LastIndexAny(content[:position], "。！？\n")
-		if boundary < 0 {
+	body := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		removedTimeLine := false
+		for _, prefix := range []string{"测试时间：", "测试时间:"} {
+			if !strings.HasPrefix(trimmed, prefix) {
+				continue
+			}
+			if value := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix)); value != "" {
+				testTime = value
+			}
+			removedTimeLine = true
 			break
 		}
-		_, size := utf8.DecodeRuneInString(content[boundary:])
-		prefix := strings.TrimSpace(content[:boundary+size])
-		rationale := strings.TrimSpace(content[boundary+size:])
-		if prefix != "" && rationale != "" {
-			return prefix + "\n\n" + heading + "\n" + rationale
+		if removedTimeLine {
+			continue
 		}
-		break
+		body = append(body, line)
 	}
-	return content + "\n\n" + heading + "\n定级依据未单独记录；CVSS 影响项需结合已验证证据复核。"
-}
-
-func ensureDeliveryDraftFailureHeading(content string) string {
-	const heading = "### 失败尝试与未验证项"
-	if strings.Contains(content, heading) {
-		return content
-	}
-	section := heading + "\n材料未记录失败尝试；需复核的未验证事项见复测标准。"
-	if index := strings.Index(content, "### Burp 复现"); index >= 0 {
-		return strings.TrimSpace(content[:index]) + "\n\n" + section + "\n\n" + strings.TrimSpace(content[index:])
-	}
-	return strings.TrimSpace(content) + "\n\n" + section
+	return "测试时间：" + testTime + "\n\n" + strings.TrimSpace(strings.Join(body, "\n"))
 }
 
 func deliveryBurpSectionRange(content string) (int, int) {
@@ -735,55 +635,6 @@ func deliveryBurpSectionRange(content string) (int, int) {
 		}
 	}
 	return start, end
-}
-
-func replaceDeliveryBurpSection(content string, start, end int, section string) string {
-	lines := strings.Split(content, "\n")
-	updated := append([]string{}, lines[:start+1]...)
-	updated = append(updated, strings.Split(strings.TrimSpace(section), "\n")...)
-	updated = append(updated, lines[end:]...)
-	return strings.Join(updated, "\n")
-}
-
-func containsDeliveryHTTPRequest(content string) bool {
-	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
-		if isDeliveryHTTPRequestLine(strings.TrimSpace(line)) {
-			return true
-		}
-	}
-	return false
-}
-
-func deliveryHTTPRequestBlockRange(content string) (int, int, bool) {
-	lines := strings.Split(content, "\n")
-	insideFence := false
-	fenceStart := -1
-	requestFound := false
-	for index, line := range lines {
-		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-		if strings.HasPrefix(trimmed, "```") {
-			if !insideFence {
-				insideFence = true
-				fenceStart = index
-				requestFound = false
-				continue
-			}
-			if requestFound {
-				return fenceStart, index + 1, true
-			}
-			insideFence = false
-			fenceStart = -1
-			continue
-		}
-		if isDeliveryHTTPRequestLine(trimmed) {
-			if insideFence {
-				requestFound = true
-			} else {
-				return index, index + 1, true
-			}
-		}
-	}
-	return -1, -1, false
 }
 
 func deliveryBurpEvidenceRequest(packet string) string {
@@ -1025,24 +876,6 @@ func normalizeDeliveryDraftSubheadings(content string, headings ...string) strin
 		}
 	}
 	return strings.TrimSpace(content)
-}
-
-func ensureDeliveryDraftDiscoveryHeading(content string) string {
-	const heading = "### 发现过程与攻击思路"
-	if strings.Contains(content, heading) {
-		return content
-	}
-	lines := strings.Split(strings.TrimSpace(content), "\n")
-	insertAt := 0
-	for index, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(strings.TrimSuffix(line, "\r")), "测试时间：") {
-			insertAt = index + 1
-			break
-		}
-	}
-	section := []string{"", heading, ""}
-	lines = append(lines[:insertAt], append(section, lines[insertAt:]...)...)
-	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func ensureDeliveryAttackChainTextFence(content string) string {
@@ -1823,25 +1656,42 @@ func parseDeliveryReportDraft(
 			draft.CVSSVector = vector
 		}
 	}
-	draft.Description = normalizeDeliveryDraftSubheadings(draft.Description, "定级依据")
 	draft.TestProcess = normalizeDeliveryDraftSubheadings(draft.TestProcess, "发现过程与攻击思路", "失败尝试与未验证项", "Burp 复现")
-	draft.TestProcess = ensureDeliveryDraftDiscoveryHeading(draft.TestProcess)
-	draft.TestProcess = ensureDeliveryBurpSection(
-		draft.TestProcess,
-		input["request_packet"],
-		input["evidence_transport"],
-		strings.EqualFold(strings.TrimSpace(input["synthetic"]), "true"),
-	)
-	draft.TestProcess = ensureDeliveryDraftFailureHeading(draft.TestProcess)
-	draft.TestProcess = ensureDeliveryBurpRequestFence(draft.TestProcess)
-	draft.DiscoveryPath = normalizeDeliveryDraftSubheadings(draft.DiscoveryPath, "复测标准")
+	if start, end := deliveryBurpSectionRange(draft.TestProcess); start >= 0 {
+		lines := strings.Split(draft.TestProcess, "\n")
+		if strings.TrimSpace(draft.BurpReproduction) == "" {
+			draft.BurpReproduction = strings.Join(lines[start+1:end], "\n")
+		}
+		draft.TestProcess = strings.Join(append(lines[:start], lines[end:]...), "\n")
+	}
+	draft.Description = normalizeDeliveryDraftSubheadings(draft.Description, "定级依据")
+	draft.TestProcess = normalizeDeliveryDraftSubheadings(draft.TestProcess, "发现过程与攻击思路", "失败尝试与未验证项")
+	draft.BurpReproduction = normalizeDeliveryDraftSubheadings(draft.BurpReproduction, "Burp 复现")
 	draft.Description = stripDeliveryDraftSectionHeading(draft.Description, "描述")
+	draft.Description = stripDeliveryDraftSectionHeading(draft.Description, "漏洞描述")
+	draft.Description = stripRedundantDeliveryDraftSubheading(draft.Description, "定级依据")
 	if strings.EqualFold(strings.TrimSpace(input["synthetic"]), "true") {
 		draft.Description = ensureDeliverySyntheticBoundary(draft.Description)
 	}
 	draft.Remediation = stripDeliveryDraftSectionHeading(draft.Remediation, "修复建议")
 	draft.Remediation = stripDeliveryDraftSectionHeading(draft.Remediation, "修复")
 	draft.TestProcess = stripDeliveryDraftSectionHeading(draft.TestProcess, "测试过程")
+	draft.TestProcess = stripRedundantDeliveryDraftSubheading(draft.TestProcess, "发现过程与攻击思路")
+	draft.TestProcess = stripRedundantDeliveryDraftSubheading(draft.TestProcess, "失败尝试与未验证项")
+	draft.TestProcess = ensureDeliveryDraftTestTime(draft.TestProcess, input["test_time_hint"])
+	draft.BurpReproduction = stripDeliveryDraftSectionHeading(draft.BurpReproduction, "Burp 复现")
+	draft.BurpReproduction = stripRedundantDeliveryDraftSubheading(draft.BurpReproduction, "Burp 复现")
+	burpEvidence := strings.Join([]string{
+		input["request_packet"],
+		input["evidence"],
+		input["existing_detailed_report"],
+	}, "\n")
+	draft.BurpReproduction = ensureDeliveryBurpSection(
+		draft.BurpReproduction,
+		burpEvidence,
+		input["evidence_transport"],
+		strings.EqualFold(strings.TrimSpace(input["synthetic"]), "true"),
+	)
 	draft.Description = stripRedundantDeliveryDraftSubheading(draft.Description, "描述")
 	draft.Remediation = stripRedundantDeliveryDraftSubheading(draft.Remediation, "修复建议")
 	draft.TestProcess = stripRedundantDeliveryDraftSubheading(draft.TestProcess, "测试过程")
@@ -1852,18 +1702,15 @@ func parseDeliveryReportDraft(
 		input["request_packet"],
 		hasExplicitDeliveryConcurrencyEvidence(input),
 	)
-	draft.DiscoveryPath = stripDeliveryDraftSectionHeading(draft.DiscoveryPath, "证据说明")
-	draft.DiscoveryPath = stripRedundantDeliveryDraftSubheading(draft.DiscoveryPath, "证据说明")
-	draft.Description = ensureDeliveryDraftRatingHeading(draft.Description)
 	if strings.EqualFold(strings.TrimSpace(input["synthetic"]), "true") {
 		draft.Description = normalizeDeliverySyntheticText(draft.Description)
 		draft.Remediation = normalizeDeliverySyntheticText(draft.Remediation)
 		draft.TestProcess = normalizeDeliverySyntheticText(draft.TestProcess)
+		draft.BurpReproduction = normalizeDeliverySyntheticText(draft.BurpReproduction)
 		draft.AttackChain = normalizeDeliverySyntheticText(draft.AttackChain)
-		draft.DiscoveryPath = normalizeDeliverySyntheticText(draft.DiscoveryPath)
 	}
 	if draft.Description == "" || draft.Remediation == "" || draft.TestProcess == "" ||
-		draft.AttackChain == "" || draft.DiscoveryPath == "" {
+		draft.AttackChain == "" || draft.BurpReproduction == "" {
 		return deliveryReportDraft{}, &deliveryReportOutputError{
 			cause: errDeliveryReportMissingBody, raw: text, stopReason: stopReason,
 			contentBlockType: contentBlockTypes, outputTokens: usage.OutputTokens,
@@ -1898,7 +1745,7 @@ func parseDeliveryReportMarkdownDraft(raw string) (deliveryReportDraft, bool) {
 	aliases := map[string]string{
 		"描述": "描述", "漏洞描述": "描述",
 		"修复": "修复建议", "修复建议": "修复建议",
-		"测试过程": "测试过程", "攻击链路": "攻击链路", "证据说明": "证据说明",
+		"测试过程": "测试过程", "攻击链路": "攻击链路", "Burp 复现": "Burp 复现",
 	}
 	sections := make([]section, 0, 5)
 	valid := true
@@ -1924,7 +1771,7 @@ func parseDeliveryReportMarkdownDraft(raw string) (deliveryReportDraft, bool) {
 	if !valid || !closed || len(sections) != 5 {
 		return deliveryReportDraft{}, false
 	}
-	expected := []string{"描述", "修复建议", "测试过程", "攻击链路", "证据说明"}
+	expected := []string{"描述", "攻击链路", "测试过程", "Burp 复现", "修复建议"}
 	for index, section := range sections {
 		if section.name != expected[index] || (index > 0 && section.headingAt <= sections[index-1].headingAt) {
 			return deliveryReportDraft{}, false
@@ -1938,11 +1785,11 @@ func parseDeliveryReportMarkdownDraft(raw string) (deliveryReportDraft, bool) {
 		return strings.TrimSpace(text[sections[index].start:end])
 	}
 	draft := deliveryReportDraft{
-		Description:   body(0),
-		Remediation:   body(1),
-		TestProcess:   body(2),
-		AttackChain:   body(3),
-		DiscoveryPath: body(4),
+		Description:      body(0),
+		AttackChain:      body(1),
+		TestProcess:      body(2),
+		BurpReproduction: body(3),
+		Remediation:      body(4),
 	}
 	for _, line := range strings.Split(text, "\n") {
 		if index := strings.Index(line, "CVSS:4.0/"); index >= 0 {
