@@ -632,6 +632,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.upgradeReporterDeliveryTemplateV33() // 禁止把合成材料写成已发生的机密性影响
 	s.upgradeReporterDeliveryTemplateV34() // 明确合成范围并整理 Burp 请求与攻击链
 	s.upgradeReporterDeliveryTemplateV35() // 固定攻击链分组节点，避免出现第二个根
+	s.upgradeReporterDeliveryTemplateV36() // 避免把合成文件称为真实敏感资产
 	s.upgradeReporterTriggerMessage()      // 老库触发消息同步报告版式与链路图规范
 	s.upgradeReporterTriggerMessageV11()   // 移除触发消息中重复的报告写作规则
 	s.seedFindingTrafficTools()            // 增加可选证据参数及只读证据工具，保留用户配置
@@ -829,6 +830,8 @@ func reporterPromptHashNeedsTemplateUpgrade(hash string) bool {
 	case "cbb9cdfde209d33d5aee3a52581d3dbb7612b4fc0be99c0dc4076acbb10e0c52": // v33 合成范围和报告结构默认提示词
 		return true
 	case "487018396adc75c029f8864b55ca8d17a6b612376ea75eace5dd88a31ae15016": // v34 合成范围与攻击链默认提示词
+		return true
+	case "9d700f4f89005e55b28d163ce5eda116b5a0c81eb5d64c3563997a02ede09ae4": // v35 合成数据敏感资产边界默认提示词
 		return true
 	default:
 		return false
@@ -1487,6 +1490,39 @@ func (s *Server) upgradeReporterDeliveryTemplateV35() {
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存攻击链分组迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV36() {
+	const flag = "reporter_prompt_delivery_template_v36"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取合成文件敏感资产边界迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新合成文件敏感资产边界提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已区分合成文件与真实敏感资产")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存合成文件敏感资产边界迁移标记失败: %v", err)
 	}
 }
 

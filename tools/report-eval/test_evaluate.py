@@ -508,6 +508,24 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertEqual(measured["remediation_alternative_terms_found"], [])
         self.assertFalse(measured["remediation_conditional_fix_detected"])
         self.assertEqual(measured["synthetic_confidentiality_claim_terms_found"], [])
+        sensitive_asset_claim = report.replace(
+            "读取到固定合成记录", "低权限用户可访问敏感备份"
+        )
+        self.assertIn(
+            "敏感备份",
+            EVAL.metrics(case, sensitive_asset_claim)[
+                "synthetic_confidentiality_claim_terms_found"
+            ],
+        )
+        negated_sensitive_asset = report.replace(
+            "读取到固定合成记录", "未验证敏感备份内容"
+        )
+        self.assertNotIn(
+            "敏感备份",
+            EVAL.metrics(case, negated_sensitive_asset)[
+                "synthetic_confidentiality_claim_terms_found"
+            ],
+        )
         self.assertTrue(measured["synthetic_target_scope_present"])
 
         without_scope = report.replace("离线合成场景，未测试真实目标。\n", "")
