@@ -67,6 +67,10 @@ def digest(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def digest_file(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
 def cases():
     return [read_json(path) for path in sorted(CASE_DIR.glob("*.json"))]
 
@@ -738,12 +742,14 @@ def review_run(folder):
             }
             continue
         # 只访问固定结果目录，run.json 不能指定仓库外文件。
-        report = (target / "outputs" / f"{cid}.md").read_text(encoding="utf-8")
-        if digest(report) != result["output_sha256"]:
+        report_path = target / "outputs" / f"{cid}.md"
+        report = report_path.read_text(encoding="utf-8")
+        if digest_file(report_path) != result["output_sha256"]:
             raise ValueError(f"{cid} 的报告已在收集后改变；另建评测目录再收集")
         if result.get("draft_file"):
-            draft = (target / result["draft_file"]).read_text(encoding="utf-8")
-            if digest(draft) != result.get("draft_sha256"):
+            draft_path = target / result["draft_file"]
+            draft = draft_path.read_text(encoding="utf-8")
+            if digest_file(draft_path) != result.get("draft_sha256"):
                 raise ValueError(f"{cid} 的模型正文已在收集后改变；另建评测目录再收集")
         review = read_json(target / "reviews" / f"{cid}.json")
         scores = review.get("scores", {})
