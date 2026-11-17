@@ -16,12 +16,13 @@ CVSS 4.0：CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N  评�
 ### 失败尝试与未验证项
 不带会话的请求被拒绝。会话有效期、改密、停用、跨设备和写操作未验证。
 ### Burp 复现
-本次未在 Burp Repeater 中复测。使用授权账号正常捕获查询和退出请求，再重放退出前的会话请求；下面的会话值必须从本次授权登录中重新捕获，模板未发送：
+本次未在 Burp Repeater 中复测。以下请求来自离线合成样本，未发送；主机和会话值仅用于样本说明，不能替换后发往真实目标。真实复测须由授权账号重新捕获请求：
 
 ```http
 GET /api/me HTTP/1.1
-Host: <授权目标域名>
-Cookie: session=<授权账号重新登录后捕获的会话>
+Host: report-eval.invalid
+Cookie: session=<SYNTHETIC_SESSION_A>
+Content-Length: 0
 ```
 
 ## 攻击链路

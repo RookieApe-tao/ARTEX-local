@@ -16,12 +16,13 @@ CVSS 4.0：CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N  评�
 ### 失败尝试与未验证项
 没有拒绝请求或完整下载结果的记录。文件是否可读取、账号权限和响应正文均未验证。
 ### Burp 复现
-本次未在 Burp Repeater 中复测。分别用 A、B 正常登录并捕获请求；以下请求模板未发送，认证字段须由 B 本人重新登录后补齐：
+本次未在 Burp Repeater 中复测。以下请求来自离线合成样本，未发送；`report-eval.invalid` 和 `X-Eval-Actor` 是样本值，不能替换后发往真实目标。真实复测须由授权账号重新登录并捕获请求：
 
 ```http
 GET /api/files/file-a/download HTTP/1.1
-Host: <授权目标域名>
-Authorization: <由 B 正常登录后捕获>
+Host: report-eval.invalid
+X-Eval-Actor: user-b
+Content-Length: 0
 ```
 
 先确认 A 可下载本人文件，再以 B 请求同一文件并比较完整响应；不要用样本标记模拟切换账号。

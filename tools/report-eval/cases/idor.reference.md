@@ -16,13 +16,14 @@ CVSS 4.0：CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N  评�
 ### 失败尝试与未验证项
 不带身份的修改返回 401。其他作业状态、批量编号和正式文件内容未验证。
 ### Burp 复现
-本次未在 Burp Repeater 中测试。用 A、B 正常登录后分别捕获请求，核对修改和回读；不要使用样本身份标记模拟账号。以下为请求模板，未发送：
+本次未在 Burp Repeater 中测试。以下请求来自离线合成样本，未发送；`report-eval.invalid` 和 `X-Eval-Actor` 是样本值，不能替换后发往真实目标。授权环境的复测应使用 A、B 各自重新捕获的请求：
 
 ```http
 POST /api/jobs/job-a/types HTTP/1.1
-Host: <授权目标域名>
-Authorization: <由 B 正常登录后捕获>
+Host: report-eval.invalid
+X-Eval-Actor: user-b
 Content-Type: application/json
+Content-Length: 26
 
 {"selectedTypes":["name"]}
 ```
