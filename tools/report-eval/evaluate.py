@@ -245,10 +245,15 @@ def run_live(args):
     if not token:
         raise ValueError("本地登录未返回会话令牌")
     info = api_json(base_url, "/api/report-eval", token=token)
-    local_cases = cases()
-    ids = [case["id"] for case in local_cases]
+    all_local_cases = cases()
+    ids = [case["id"] for case in all_local_cases]
     if info.get("case_ids") != sorted(ids):
         raise ValueError("运行中的固定样本与本地评测材料不一致")
+    selected_ids = set(getattr(args, "case", None) or ids)
+    unknown_ids = selected_ids - set(ids)
+    if unknown_ids:
+        raise ValueError(f"指定了未知场景：{', '.join(sorted(unknown_ids))}")
+    local_cases = [case for case in all_local_cases if case["id"] in selected_ids]
     model = info.get("model") or "未返回模型标识"
     target.mkdir(parents=True)
     for folder in ("inputs", "drafts", "outputs", "raw-responses", "diagnostics", "reviews"):
@@ -489,7 +494,9 @@ def collect(args):
         "cached_input_tokens": args.cached_input_tokens,
         "duration_seconds": args.seconds,
     }
+    meta.get("failures", {}).pop(args.case, None)
     write_json(target / "run.json", meta)
+    write_json(target / "report-evaluation.json", review_run(target))
     print(f"已收集 {args.case}；来源：{args.source}。语义质量仍需人工审阅。")
 
 
@@ -547,6 +554,33 @@ def has_unnegated_phrase(text, phrase):
     return False
 
 
+def identity_headers_match(actual, expected):
+    if actual == expected:
+        return True
+    if len(actual) != len(expected):
+        return False
+    redacted_values = {"[REDACTED]", "<REDACTED>", "[已脱敏]"}
+    sensitive_headers = {"authorization", "cookie", "x-auth-token"}
+    for actual_header, expected_header in zip(actual, expected):
+        actual_name, actual_separator, actual_value = actual_header.partition(":")
+        expected_name, expected_separator, expected_value = expected_header.partition(":")
+        if not actual_separator or not expected_separator:
+            return False
+        if actual_name.strip().casefold() != expected_name.strip().casefold():
+            return False
+        actual_value = actual_value.strip()
+        expected_value = expected_value.strip()
+        if (
+            actual_name.strip().casefold() in sensitive_headers
+            and actual_value in redacted_values
+            and expected_value
+        ):
+            continue
+        if actual_value != expected_value:
+            return False
+    return True
+
+
 def metrics(case, report):
     narrative, blocks, closed = markdown_parts(report)
     normalized = report.replace("\r\n", "\n")
@@ -601,6 +635,16 @@ def metrics(case, report):
     burp_request_packet_present = bool(burp_request_packet_lines)
     is_http_case = case["kind"] == "http"
     is_non_http_case = case["kind"] == "non_http"
+    is_synthetic = bool(case.get("synthetic"))
+    synthetic_target_scope_present = (
+        "离线合成" in report_body
+        and any(
+            phrase in report_body
+            for phrase in ("未测试真实目标", "未访问真实目标", "未测试真实系统")
+        )
+        if is_synthetic
+        else None
+    )
     non_http_burp_not_applicable = is_non_http_case and "Burp 不适用" in burp_text
     non_http_unexpected_http_request_packet = is_non_http_case and burp_request_packet_present
     remediation_match = re.search(
@@ -671,7 +715,10 @@ def metrics(case, report):
             if re.match(r"(?i)^(?:X-Eval-Actor|Authorization|Cookie|X-Auth-Token):", header.strip())
         )
         expected_headers = [headers for evidence_line, headers in evidence_identity_headers if evidence_line == line]
-        if expected_headers and actual_headers not in expected_headers:
+        if expected_headers and not any(
+            identity_headers_match(actual_headers, expected)
+            for expected in expected_headers
+        ):
             burp_identity_header_mismatches.append(line)
     burp_identity_headers_match_evidence = bool(burp_request_blocks) and not burp_identity_header_mismatches
     burp_request_packet_matches_evidence = bool(burp_request_packet_lines) and all(
@@ -849,6 +896,7 @@ def metrics(case, report):
         "synthetic_confidentiality_claim_terms_found": (
             synthetic_confidentiality_claim_terms_found
         ),
+        "synthetic_target_scope_present": synthetic_target_scope_present,
         "burp_request_identity_headers_match_evidence": (
             burp_identity_headers_match_evidence
             if has_http_request_evidence
@@ -875,6 +923,8 @@ def review_run(folder):
     }
     for case in cases():
         cid = case["id"]
+        if cid not in meta["corpus_sha256"]:
+            continue
         current_digest = digest(json.dumps(model_input(case), ensure_ascii=False, sort_keys=True))
         if meta["corpus_sha256"].get(cid) != current_digest:
             raise ValueError(f"{cid} 的合成材料已变化；请用相同版本的材料重新准备评测")
@@ -915,6 +965,10 @@ def review_run(folder):
 def compare(args):
     before, after = review_run(args.before), review_run(args.after)
     problems = []
+    expected_cases = {case["id"] for case in cases()}
+    for label, result in (("before", before), ("after", after)):
+        if set(result["cases"]) != expected_cases:
+            problems.append(f"{label} 未包含全部固定样本")
     for key in ("model", "generation_settings", "corpus_sha256"):
         if before[key] != after[key]:
             problems.append(f"{key} 不一致，不能作为严格对照")
@@ -971,6 +1025,10 @@ def main():
     live_cmd = commands.add_parser("run-live", help="登录本机 ARTEX，对固定合成样本运行无工具报告生成")
     live_cmd.add_argument("--base-url", default="http://127.0.0.1:8787")
     live_cmd.add_argument("--label", default="after")
+    live_cmd.add_argument(
+        "--case", action="append", choices=sorted(case["id"] for case in cases()),
+        help="只运行指定样本；可重复指定，用于重试失败样本",
+    )
     live_cmd.add_argument("--output", required=True)
     live_cmd.set_defaults(action=run_live)
     collect_cmd = commands.add_parser("collect", help="显式记录已取得的输出来源及实际消耗")

@@ -48,18 +48,22 @@ func redactDeliveryRequestLine(line string) string {
 	if len(parts) != 3 || !strings.HasPrefix(strings.ToUpper(parts[2]), "HTTP/") {
 		return line
 	}
-	target, err := url.ParseRequestURI(parts[1])
-	if err != nil || target.RawQuery == "" {
+	queryStart := strings.IndexByte(parts[1], '?')
+	if queryStart < 0 {
 		return line
 	}
-	query := target.Query()
-	for key := range query {
-		if sensitiveDeliveryField(key) {
-			query[key] = []string{redactedDeliveryValue}
+	if _, err := url.ParseRequestURI(parts[1]); err != nil {
+		return line
+	}
+	query := strings.Split(parts[1][queryStart+1:], "&")
+	for index, parameter := range query {
+		key, _, _ := strings.Cut(parameter, "=")
+		decodedKey, err := url.QueryUnescape(key)
+		if err == nil && sensitiveDeliveryField(decodedKey) {
+			query[index] = key + "=" + url.QueryEscape(redactedDeliveryValue)
 		}
 	}
-	target.RawQuery = query.Encode()
-	parts[1] = target.String()
+	parts[1] = parts[1][:queryStart+1] + strings.Join(query, "&")
 	return strings.Join(parts, " ")
 }
 

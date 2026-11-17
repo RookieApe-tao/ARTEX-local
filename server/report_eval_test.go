@@ -334,6 +334,7 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"根因（只有源码、配置或日志能证明时才填写，否则记为未知）",
 		"不得称为真实用户资料、敏感数据或实际泄露",
 		"禁止声称发生任何真实数据泄露或机密性影响",
+		"输入标记 synthetic=true 或证据来源标为离线合成时，描述第一句必须写",
 		"不得把样本内容本身称为“合成样本泄露”",
 		"不得把 VC:L 描述成已确认、已证实、已观察到或局部发生的机密性影响",
 		"VC:L 为待复核的潜在影响假设，真实数据影响未验证",
@@ -345,8 +346,11 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"修复建议只写一项与已确认行为相符的主要措施",
 		"第二种措施与不同权限值均不得出现",
 		"缺陷行为未确认时只列补证步骤，不给条件式代码修复建议",
-		"相同业务编号重复创建时建议建立数据库唯一约束",
+		"业务约定一个编号只能登记一次而观察到重复记录时，描述为违反业务约定",
+		"业务约定一个编号只能登记一次时，只建议阻止相同编号重复登记",
 		"同一路径重复出现时，每一次都必须在攻击链独立成节点",
+		"布尔注入的真、假条件各自成并列分支",
+		"非 HTTP 攻击链以“本地终端记录”为根",
 		"合成样本不能直接发往真实目标，也不能要求把样本值替换成真实凭据",
 		"建议复测请求（未发送）",
 		"所有 HTTP 报告都必须有 Burp Repeater 小节和至少一段足以复测核心结论的 HTTP 请求包，与 Burp 是否实际使用无关",
@@ -356,6 +360,7 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"避免测试脚本内部说法和难懂缩写",
 		"正文以 800 字为参考预算",
 		"无身份、真假条件等独立对照放在独立分支，不接在主流程之后造成因果暗示",
+		"除第一行根节点外，攻击链代码块中每个非空行都必须以“├─”或“└─”开始",
 		"### 定级依据",
 		"### 发现过程与攻击思路",
 		"### 失败尝试与未验证项",
@@ -368,6 +373,139 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 	}
 	if strings.Count(prompt, agent.DeliveryReportDraftRules) != 1 || strings.Contains(prompt, agent.DeliveryReportWritingRules) {
 		t.Fatal("compatibility draft generation must use only its dedicated draft rules")
+	}
+}
+
+func TestNormalizeDeliveryAttackChainGroupBranches(t *testing.T) {
+	input := strings.Join([]string{
+		"验证请求组",
+		"   └─ 主流程",
+		"      └─ GET /api/jobs/job-a",
+		"         └─ 读取到作业状态",
+		"                  └─ 独立对照",
+		"                     └─ POST /api/jobs/job-a/types",
+		"                        └─ 请求被拒绝",
+	}, "\n")
+
+	got := normalizeDeliveryAttackChainGroupBranches(input)
+	want := strings.Join([]string{
+		"验证请求组",
+		"   ├─ 主流程",
+		"      └─ GET /api/jobs/job-a",
+		"         └─ 读取到作业状态",
+		"   └─ 独立对照",
+		"      └─ POST /api/jobs/job-a/types",
+		"         └─ 请求被拒绝",
+	}, "\n")
+	if got != want {
+		t.Fatalf("normalized attack-chain groups=%q, want %q", got, want)
+	}
+}
+
+func TestDeliveryAttackChainGroupIndentationAccountsForTreeGuides(t *testing.T) {
+	input := strings.Join([]string{
+		"验证请求组",
+		"├─ 主流程",
+		"│  ├─ GET /api/jobs/job-a (基线)",
+		"│  │  └─ 结果：类型为空",
+		"│  ├─ POST /api/jobs/job-a/types (操作)",
+		"│  │  └─ 结果：修改成功",
+		"│  └─ GET /api/jobs/job-a (回读)",
+		"│     └─ 结果：类型已修改",
+		"└─ 独立对照",
+		"   └─ POST /api/jobs/job-a/types (无身份)",
+		"      └─ 结果：请求被拒绝",
+	}, "\n")
+	want := "```text\n" + strings.Join([]string{
+		"验证请求组",
+		"   ├─ 主流程",
+		"      ├─ GET /api/jobs/job-a (基线)",
+		"         └─ 结果：类型为空",
+		"      ├─ POST /api/jobs/job-a/types (操作)",
+		"         └─ 结果：修改成功",
+		"      └─ GET /api/jobs/job-a (回读)",
+		"         └─ 结果：类型已修改",
+		"   └─ 独立对照",
+		"      └─ POST /api/jobs/job-a/types (无身份)",
+		"         └─ 结果：请求被拒绝",
+	}, "\n") + "\n```"
+	if got := ensureDeliveryAttackChainTextFence(input); got != want {
+		t.Fatalf("normalized group indentation=%q, want %q", got, want)
+	}
+}
+
+func TestDeliveryReportDraftEnsuresRatingHeadingAndSanitizesSyntheticClaims(t *testing.T) {
+	message, err := json.Marshal(deliveryReportDraft{
+		CVSSVector:    "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+		Description:   "离线合成场景，未测试真实目标。读取敏感数据的影响尚未验证。VC:L 为待复核的潜在影响假设。",
+		Remediation:   "阻止非授权用户访问敏感数据。",
+		TestProcess:   "### 发现过程与攻击思路\n读取到合成内容。\n### 失败尝试与未验证项\n真实影响未验证。\n### Burp 复现\n请求未发送。",
+		AttackChain:   "验证请求组\n└─ GET /api/me\n   └─ 返回用户信息",
+		DiscoveryPath: "### 复测标准\n退出后请求应被拒绝。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := parseDeliveryReportDraft(
+		llm.Message{Content: []llm.ContentBlock{llm.TextBlock(string(message))}},
+		"end_turn",
+		llm.Usage{},
+		map[string]string{"synthetic": "true", "evidence_transport": "http"},
+		0,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(draft.Description, "### 定级依据\nVC:L 为待复核的潜在影响假设。") {
+		t.Fatalf("rating rationale was not moved beneath its required heading: %s", draft.Description)
+	}
+	for name, content := range map[string]string{
+		"description": draft.Description,
+		"remediation": draft.Remediation,
+	} {
+		if strings.Contains(content, "敏感数据") {
+			t.Fatalf("synthetic %s retained a sensitive-data claim: %s", name, content)
+		}
+	}
+	cleaned := normalizeDeliverySyntheticText("VC:L 基于能读取合成样本内容；真实机密性影响未验证，评分前提待复核。收紧文件权限至仅允许属主或授权组读取（如600或640）。")
+	for _, expected := range []string{
+		"VC:L 为待复核的潜在影响假设",
+		"真实数据影响未验证",
+		"仅允许属主读取",
+	} {
+		if !strings.Contains(cleaned, expected) {
+			t.Fatalf("synthetic wording was not normalized for %q: %s", expected, cleaned)
+		}
+	}
+	if strings.Contains(cleaned, "或") {
+		t.Fatalf("synthetic remediation still contains alternate permissions: %s", cleaned)
+	}
+	plainLanguage := normalizeDeliverySyntheticText("owner 为 eval-admin；total=0；id=reg-1；ok:true；items=[reg-1, reg-2, reg-3]；作业所有者或具备显式管理权限。")
+	for _, expected := range []string{
+		"所有者为 eval-admin",
+		"记录数为 0",
+		"新记录编号为 reg-1",
+		"操作成功",
+		"查询结果包含 3 条记录（编号 reg-1、reg-2、reg-3）",
+		"作业所有者。",
+	} {
+		if !strings.Contains(plainLanguage, expected) {
+			t.Fatalf("synthetic report did not replace shorthand %q: %s", expected, plainLanguage)
+		}
+	}
+	reportTerms := normalizeDeliverySyntheticText("total为0；total:3；ID reg-1；items含reg-1/2/3；返回 ok:true；selectedTypes含name；selectedTypes 由空变为 name；selectedTypes 设为 [\"name\"]；确认 selectedTypes 已变；state为WAITING；state由WAITING变为SUCCESS；state 和 formalAvailable 状态变更；资源所有者或授权协作者")
+	for _, expected := range []string{"记录数为 0", "记录数为 3", "新记录编号为 reg-1", "查询结果包含 3 条记录", "操作成功", "所选类型为 name", "所选类型由空变为 name", "所选类型设为 name", "确认 所选类型已变", "作业状态为等待中", "作业状态由等待中变为已完成", "作业状态与正式文件可用状态变更", "资源所有者"} {
+		if !strings.Contains(reportTerms, expected) {
+			t.Fatalf("report wording was not normalized for %q: %s", expected, reportTerms)
+		}
+	}
+	if strings.Contains(reportTerms, "授权协作者") || strings.Contains(reportTerms, "selectedTypes") || strings.Contains(reportTerms, "formalAvailable") || strings.Contains(reportTerms, "state") || strings.Contains(reportTerms, "返回 操作成功") {
+		t.Fatalf("synthetic remediation retained unsupported authorization alternatives: %s", reportTerms)
+	}
+	requestWithBody := "将 selectedTypes 设为 [\"name\"]\n```http\nPOST /api/jobs/job-a/types HTTP/1.1\nContent-Length: 26\n\n{\"selectedTypes\":[\"name\"]}\n```"
+	normalizedRequest := normalizeDeliverySyntheticText(requestWithBody)
+	if !strings.Contains(normalizedRequest, "将 所选类型设为 name") || !strings.Contains(normalizedRequest, `{"selectedTypes":["name"]}`) {
+		t.Fatalf("synthetic prose changed or lost the exact HTTP request body: %s", normalizedRequest)
 	}
 }
 
@@ -411,7 +549,7 @@ func TestDeliveryReportDraftRestoresBurpSectionAndRedactsEvidencePacket(t *testi
 		t.Fatalf("required test subsections are missing or out of order: %s", process)
 	}
 	burpSection := strings.Join(strings.Split(process, "\n")[burpStart+1:burpEnd], "\n")
-	if !strings.Contains(burpSection, "本次未在 Burp 中发送") || !strings.Contains(burpSection, "POST /api/jobs/job-a/types HTTP/1.1") {
+	if !strings.Contains(burpSection, "本次未在 Burp Repeater 中发送") || !strings.Contains(burpSection, "POST /api/jobs/job-a/types HTTP/1.1") {
 		t.Fatalf("Burp guidance or the request packet is missing: %s", burpSection)
 	}
 	if strings.Contains(burpSection, "Burp 不适用") {
@@ -419,6 +557,53 @@ func TestDeliveryReportDraftRestoresBurpSectionAndRedactsEvidencePacket(t *testi
 	}
 	if strings.Contains(burpSection, "session-secret") || strings.Contains(burpSection, "cookie-secret") || strings.Contains(burpSection, `"secret"`) {
 		t.Fatalf("sensitive values leaked into the Burp request packet: %s", burpSection)
+	}
+}
+
+func TestDeliveryReportDraftLabelsSyntheticMaterialAndNormalizesBurpSection(t *testing.T) {
+	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
+	message, err := json.Marshal(deliveryReportDraft{
+		CVSSVector:    vector,
+		Description:   "普通用户可修改其他用户设置。\n### 定级依据\n观察到配置变化。",
+		Remediation:   "拒绝非所有者的修改请求。",
+		TestProcess:   "### 发现过程与攻击思路\n重放修改请求。\n### 失败尝试与未验证项\n未检查其他资源。\n### Burp 复现\n本次未在 Burp 中发送；以下为建议复测请求（未发送）。建议复测请求（未发送）：\n```http\nPOST /api/jobs/job-a/types HTTP/1.1\nHost: report-eval.invalid\n```",
+		AttackChain:   "验证请求组\n└─ POST /api/jobs/job-a/types\n   └─ 修改成功",
+		DiscoveryPath: "离线样本。\n### 复测标准\n非所有者请求应失败。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := parseDeliveryReportDraft(llm.Message{Content: []llm.ContentBlock{llm.TextBlock(string(message))}}, "end_turn", llm.Usage{}, map[string]string{
+		"synthetic":          "true",
+		"evidence_transport": "http",
+		"request_packet":     "证据绑定 1（漏洞验证）\nPOST /api/jobs/job-a/types HTTP/1.1\r\nHost: report-eval.invalid\r\nX-Eval-Actor: user-b\r\nContent-Type: application/json\r\nContent-Length: 26\r\n\r\n{\"selectedTypes\":[\"name\"]}",
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(draft.Description, "离线合成场景，未测试真实目标。") {
+		t.Fatalf("synthetic scope was not made explicit: %s", draft.Description)
+	}
+	if strings.Count(draft.Description, "未测试真实目标") != 1 {
+		t.Fatalf("synthetic scope was duplicated: %s", draft.Description)
+	}
+	burpStart, burpEnd := deliveryBurpSectionRange(draft.TestProcess)
+	if burpStart < 0 || burpEnd <= burpStart {
+		t.Fatalf("HTTP report is missing its Burp subsection: %s", draft.TestProcess)
+	}
+	burpSection := strings.Join(strings.Split(draft.TestProcess, "\n")[burpStart+1:burpEnd], "\n")
+	for _, expected := range []string{
+		"离线合成请求未发送到真实目标",
+		"POST /api/jobs/job-a/types HTTP/1.1",
+		"X-Eval-Actor: user-b",
+		`{"selectedTypes":["name"]}`,
+	} {
+		if !strings.Contains(burpSection, expected) {
+			t.Fatalf("synthetic Burp section is missing %q: %s", expected, burpSection)
+		}
+	}
+	if strings.Count(burpSection, "建议复测请求") != 0 {
+		t.Fatalf("duplicate model prose was retained in the Burp section: %s", burpSection)
 	}
 }
 
@@ -474,7 +659,7 @@ func TestDeliveryBurpEvidenceRequestKeepsEvalPacketsSeparate(t *testing.T) {
 		"Host: report-eval.invalid",
 		"",
 		"",
-		"### 漏洞验证：其他用户提交修改 · 请求",
+		"### 其他用户提交修改 · 请求",
 		"POST /api/jobs/job-a/types HTTP/1.1",
 		"Host: report-eval.invalid",
 		"Content-Type: application/json",
@@ -486,6 +671,15 @@ func TestDeliveryBurpEvidenceRequestKeepsEvalPacketsSeparate(t *testing.T) {
 		"### 修改后查询 · 请求",
 		"GET /api/jobs/job-a HTTP/1.1",
 		"Host: report-eval.invalid",
+		"",
+		"",
+		"### 不带身份提交修改 · 请求",
+		"POST /api/jobs/job-a/types HTTP/1.1",
+		"Host: report-eval.invalid",
+		"Content-Type: application/json",
+		"Content-Length: 26",
+		"",
+		`{"selectedTypes":["name"]}`,
 	}, "\n")
 
 	got := deliveryBurpEvidenceRequest(packet)
@@ -497,6 +691,92 @@ func TestDeliveryBurpEvidenceRequestKeepsEvalPacketsSeparate(t *testing.T) {
 	}
 	if strings.Contains(got, `"secret"`) || !strings.Contains(got, `"token":"[REDACTED]"`) {
 		t.Fatalf("extracted request was not redacted: %q", got)
+	}
+}
+
+func TestDeliveryBurpEvidenceRequestSelectsCoreConcurrentWrite(t *testing.T) {
+	packet := strings.Join([]string{
+		"### 提交前查询 · 请求",
+		"GET /api/registrations?reference=EVAL-RACE HTTP/1.1",
+		"Host: report-eval.invalid",
+		"Content-Length: 0",
+		"",
+		"",
+		"### 第一次并发提交 · 请求",
+		"POST /api/registrations HTTP/1.1",
+		"Host: report-eval.invalid",
+		"Content-Type: application/json",
+		"Content-Length: 25",
+		"",
+		`{"reference":"EVAL-RACE"}`,
+		"",
+		"",
+		"### 提交后查询 · 请求",
+		"GET /api/registrations?reference=EVAL-RACE HTTP/1.1",
+		"Host: report-eval.invalid",
+	}, "\n")
+	got := deliveryBurpEvidenceRequest(packet)
+	if !strings.HasPrefix(got, "POST /api/registrations HTTP/1.1\r\n") || !strings.Contains(got, `{"reference":"EVAL-RACE"}`) {
+		t.Fatalf("Burp packet should select a repeated write request, got %q", got)
+	}
+}
+
+func TestDeliveryAttackChainMovesIndependentControlToRootGroup(t *testing.T) {
+	input := strings.Join([]string{
+		"验证请求组",
+		"├─ 主流程",
+		"│  ├─ GET /api/registrations?reference=EVAL-RACE (基线)",
+		"│  │  └─ 结果：记录数为 0",
+		"│  ├─ 并发提交 2 次相同请求",
+		"│  │  ├─ POST /api/registrations",
+		"│  │  │  └─ 结果：HTTP 201，新记录编号为 reg-1",
+		"│  │  └─ POST /api/registrations",
+		"│  │     └─ 结果：HTTP 201，新记录编号为 reg-2",
+		"│  └─ GET /api/registrations?reference=EVAL-RACE (回读)",
+		"│     └─ 结果：记录数为 2",
+		"│        └─ 独立对照",
+		"│           └─ POST /api/registrations (缺少编号)",
+		"│              └─ 结果：HTTP 400",
+	}, "\n")
+	requests := "POST /api/registrations HTTP/1.1\r\nContent-Length: 0\r\n\r\nPOST /api/registrations HTTP/1.1\r\nContent-Length: 0\r\n\r\n"
+	got := ensureDeliveryAttackChainTextFenceWithEvidence(input, requests, true)
+	for _, expected := range []string{"   ├─ 主流程", "   └─ 独立对照", "      └─ POST /api/registrations (缺少编号)"} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("attack-chain group was not kept at the root: missing %q in\n%s", expected, got)
+		}
+	}
+	if strings.Contains(got, "                  └─ 独立对照") {
+		t.Fatalf("independent control remains connected to the main flow:\n%s", got)
+	}
+}
+
+func TestDeliveryAttackChainSeparatesUnlabeledControlRequest(t *testing.T) {
+	input := strings.Join([]string{
+		"验证请求组",
+		"   └─ GET /api/registrations?reference=EVAL-RACE (回读)",
+		"      └─ 结果：记录数为 3",
+		"         └─ POST /api/registrations (缺少业务编号的提交)",
+		"            └─ 结果：HTTP 400 Bad Request",
+	}, "\n")
+	want := strings.Join([]string{
+		"验证请求组",
+		"   ├─ GET /api/registrations?reference=EVAL-RACE (回读)",
+		"      └─ 结果：记录数为 3",
+		"   └─ 独立对照",
+		"      └─ POST /api/registrations (缺少业务编号的提交)",
+		"         └─ 结果：HTTP 400 Bad Request",
+	}, "\n")
+	got := ensureDeliveryAttackChainTextFenceWithEvidence(input, "", false)
+	if got != "```text\n"+want+"\n```" {
+		t.Fatalf("unlabeled control request remained attached to the main path:\n%s", got)
+	}
+}
+
+func TestDeliveryAttackChainIndentsRootChildren(t *testing.T) {
+	input := "本地终端记录\n├─ id (当前用户)\n   └─ 结果：eval-user\n├─ cat /tmp/report-eval/backups/customer-notes.txt\n   └─ 结果：读取到合成记录"
+	want := "```text\n本地终端记录\n   ├─ id (当前用户)\n      └─ 结果：eval-user\n   └─ cat /tmp/report-eval/backups/customer-notes.txt\n      └─ 结果：读取到合成记录\n```"
+	if got := ensureDeliveryAttackChainTextFence(input); got != want {
+		t.Fatalf("root children indentation=%q, want %q", got, want)
 	}
 }
 
@@ -512,7 +792,7 @@ func TestDeliveryNonHTTPBurpSectionRemovesFabricatedRequest(t *testing.T) {
 		"```",
 	}, "\n")
 
-	got := ensureDeliveryBurpSection(content, "", "non_http")
+	got := ensureDeliveryBurpSection(content, "", "non_http", false)
 	if !strings.Contains(got, "Burp 不适用：本次通过本地命令或终端记录验证。") {
 		t.Fatalf("non-HTTP report is missing the required boundary: %s", got)
 	}
