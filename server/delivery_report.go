@@ -621,6 +621,10 @@ func normalizeDeliverySyntheticTextLine(content string) string {
 		"读取敏感数据", "读取文件内容",
 		"泄露敏感数据", "读取文件内容",
 		"敏感数据", "相关内容",
+		"本地低权限即可访问敏感备份", "样本显示低权限用户可读取备份文件",
+		"敏感备份文件", "备份文件",
+		"敏感备份", "备份文件",
+		"敏感文件", "文件",
 		"owner 为", "所有者为",
 		"或具备显式管理权限", "",
 		"作业所有者或授权协作者", "作业所有者",
@@ -641,6 +645,10 @@ func normalizeDeliverySyntheticTextLine(content string) string {
 		"属主或授权组", "属主",
 	)
 	content = replacements.Replace(content)
+	content = regexp.MustCompile(`修改了\s+所有者为\s+([^，。\s]+)\s+的作业`).ReplaceAllString(content, "修改了 $1 名下的作业")
+	content = regexp.MustCompile(`显示\s+(所选类型|作业状态|正式文件可用状态)`).ReplaceAllString(content, "显示$1")
+	content = regexp.MustCompile(`\s+及\s+`).ReplaceAllString(content, "及")
+	content = regexp.MustCompile(`\s+字段`).ReplaceAllString(content, "字段")
 	content = regexp.MustCompile(`(?:作业|资源)?所有者\s*或\s*(?:拥有|具备|有)?\s*共享授权`).ReplaceAllString(content, "作业所有者")
 	content = regexp.MustCompile(`selectedTypes\s*由\s*空变为\s*name`).ReplaceAllString(content, "所选类型由空变为 name")
 	content = regexp.MustCompile(`selectedTypes\s*从\s*空变为\s*name`).ReplaceAllString(content, "所选类型由空变为 name")

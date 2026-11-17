@@ -662,6 +662,8 @@ def metrics(case, report):
             term
             for term in (
                 "敏感数据",
+                "敏感备份",
+                "敏感文件",
                 "合成样本泄露",
                 "机密性轻微泄露",
                 "低危机密性影响",

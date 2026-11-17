@@ -468,6 +468,15 @@ func TestDeliveryReportDraftEnsuresRatingHeadingAndSanitizesSyntheticClaims(t *t
 		}
 	}
 	cleaned := normalizeDeliverySyntheticText("VC:L 基于能读取合成样本内容；真实机密性影响未验证，评分前提待复核。收紧文件权限至仅允许属主或授权组读取（如600或640）。")
+	assetDescription := normalizeDeliverySyntheticText("本地低权限即可访问敏感备份，但仅观察到合成样本，真实数据影响未验证。修改了 所有者为 user-a 的作业脱敏设置。回读显示 所选类型、作业状态 及 正式文件可用状态 字段发生非预期变更。")
+	for _, expected := range []string{"样本显示低权限用户可读取备份文件", "修改了 user-a 名下的作业", "回读显示所选类型、作业状态及正式文件可用状态字段"} {
+		if !strings.Contains(assetDescription, expected) {
+			t.Fatalf("synthetic report did not normalize awkward or overclaimed wording %q: %s", expected, assetDescription)
+		}
+	}
+	if strings.Contains(assetDescription, "敏感备份") {
+		t.Fatalf("synthetic report retained a sensitive-asset claim: %s", assetDescription)
+	}
 	for _, expected := range []string{
 		"VC:L 为待复核的潜在影响假设",
 		"真实数据影响未验证",

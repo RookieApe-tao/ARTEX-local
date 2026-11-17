@@ -154,6 +154,13 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptHashNeedsTemplateUpgrade(previousV34Hash) {
 		t.Fatal("previous v34 stock prompt would permit a disconnected attack-chain group")
 	}
+	const previousV35Hash = "9d700f4f89005e55b28d163ce5eda116b5a0c81eb5d64c3563997a02ede09ae4"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV35Hash) {
+		t.Fatal("previous v35 stock prompt would describe synthetic files as sensitive assets")
+	}
+	if reporterPromptNeedsTemplateUpgrade(agent.ReporterDefaultPrompt) {
+		t.Fatal("current stock prompt should not be migrated")
+	}
 	if reporterPromptNeedsTemplateUpgrade(agent.ReporterDefaultPrompt + "\n用户自定义要求。") {
 		t.Fatal("an edited v23 prompt must not be migrated over")
 	}
