@@ -325,6 +325,130 @@ func stripDeliveryDraftSectionHeading(content, section string) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
+func ensureDeliveryBurpRequestFence(content string) string {
+	lines := strings.Split(content, "\n")
+	sectionStart, sectionEnd := -1, len(lines)
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if sectionStart < 0 {
+			if trimmed == "### Burp 复现" {
+				sectionStart = index
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "### ") || strings.HasPrefix(trimmed, "## ") {
+			sectionEnd = index
+			break
+		}
+	}
+	if sectionStart < 0 {
+		return content
+	}
+
+	insideFence := false
+	fenceStart := -1
+	requestInFence := false
+	requestLine := -1
+	for index := sectionStart + 1; index < sectionEnd; index++ {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(lines[index], "\r"))
+		if strings.HasPrefix(trimmed, "```") {
+			if !insideFence {
+				insideFence = true
+				fenceStart = index
+				requestInFence = false
+				continue
+			}
+			if requestInFence {
+				if strings.TrimSpace(strings.TrimSuffix(lines[fenceStart], "\r")) != "```http" {
+					lines[fenceStart] = "```http"
+				}
+				return strings.Join(lines, "\n")
+			}
+			insideFence = false
+			fenceStart = -1
+			continue
+		}
+		if !isDeliveryHTTPRequestLine(trimmed) {
+			continue
+		}
+		if insideFence {
+			requestInFence = true
+		} else if requestLine < 0 {
+			requestLine = index
+		}
+	}
+	if requestLine < 0 {
+		return strings.Join(lines, "\n")
+	}
+
+	packetEnd := deliveryRawHTTPRequestEnd(lines, requestLine, sectionEnd)
+	formatted := make([]string, 0, len(lines)+2)
+	formatted = append(formatted, lines[:requestLine]...)
+	formatted = append(formatted, "```http")
+	formatted = append(formatted, lines[requestLine:packetEnd]...)
+	formatted = append(formatted, "```")
+	formatted = append(formatted, lines[packetEnd:]...)
+	return strings.Join(formatted, "\n")
+}
+
+func isDeliveryHTTPRequestLine(line string) bool {
+	fields := strings.Fields(line)
+	return len(fields) == 3 && fields[0] != "" && fields[1] != "" && strings.HasPrefix(strings.ToUpper(fields[2]), "HTTP/")
+}
+
+func deliveryRawHTTPRequestEnd(lines []string, requestLine, sectionEnd int) int {
+	headerEnd := -1
+	contentLength := -1
+	chunked := false
+	for index := requestLine + 1; index < sectionEnd; index++ {
+		line := strings.TrimSpace(strings.TrimSuffix(lines[index], "\r"))
+		if line == "" {
+			headerEnd = index
+			break
+		}
+		name, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "content-length":
+			if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && parsed >= 0 {
+				contentLength = parsed
+			}
+		case "transfer-encoding":
+			chunked = strings.Contains(strings.ToLower(value), "chunked")
+		}
+	}
+	if headerEnd < 0 {
+		return sectionEnd
+	}
+	if contentLength == 0 || (contentLength < 0 && !chunked) {
+		return headerEnd + 1
+	}
+	if chunked {
+		for index := headerEnd + 1; index < sectionEnd; index++ {
+			if strings.TrimSpace(strings.TrimSuffix(lines[index], "\r")) == "0" {
+				if index+1 < sectionEnd && strings.TrimSpace(lines[index+1]) == "" {
+					return index + 2
+				}
+				return index + 1
+			}
+		}
+		return sectionEnd
+	}
+	bodyBytes := 0
+	for index := headerEnd + 1; index < sectionEnd; index++ {
+		if index > headerEnd+1 {
+			bodyBytes++
+		}
+		bodyBytes += len([]byte(strings.TrimSuffix(lines[index], "\r")))
+		if bodyBytes >= contentLength {
+			return index + 1
+		}
+	}
+	return sectionEnd
+}
+
 func hasExplicitDeliveryConcurrencyEvidence(input map[string]string) bool {
 	source := strings.ToLower(input["summary"] + "\n" + input["evidence"])
 	for _, negative := range []string{"未测试并发", "未验证并发", "未执行并发", "并发未测试", "并发未验证", "没有进行并发测试", "没有并发测试"} {
@@ -911,6 +1035,7 @@ func parseDeliveryReportDraft(
 	draft.Remediation = stripDeliveryDraftSectionHeading(draft.Remediation, "修复建议")
 	draft.Remediation = stripDeliveryDraftSectionHeading(draft.Remediation, "修复")
 	draft.TestProcess = stripDeliveryDraftSectionHeading(draft.TestProcess, "测试过程")
+	draft.TestProcess = ensureDeliveryBurpRequestFence(draft.TestProcess)
 	draft.AttackChain = stripDeliveryDraftSectionHeading(draft.AttackChain, "攻击链路")
 	draft.AttackChain = ensureDeliveryAttackChainTextFenceWithEvidence(
 		draft.AttackChain,
