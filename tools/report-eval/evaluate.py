@@ -33,6 +33,15 @@ SHELL_COMMAND_NAMES = {
     "netstat", "nmap", "ping", "ps", "pwd", "python", "python3", "rm",
     "sed", "sh", "ss", "stat", "sudo", "tail", "tar", "touch", "whoami",
 }
+UNCLEAR_REPORT_TERMS = (
+    "几腿",
+    "六腿差分",
+    "阴性对照",
+    "sha256_16",
+)
+HTTP_REQUEST_LINE = re.compile(r"(?mi)^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S+\s+HTTP/\d(?:\.\d)?\s*$")
+STATUS_LENGTH_SHORTHAND = re.compile(r"\b\d{3}\s*/\s*\d+\s*[Bb]\b")
+INTERNAL_VALUE_SHORTHAND = re.compile(r"\b(?:held|readOnly|message|payload|sha256(?:_\d+)?)\s*=")
 INSTRUCTION = (
     "只根据附带的离线合成材料写一份交付报告；不调用工具、不执行命令、不访问网络。"
     "遵循系统提示中的固定结构和事实边界，只写材料明确支持的事实，不补造测试动作、身份、影响或实现根因。"
@@ -536,6 +545,24 @@ def metrics(case, report):
         r"(?ms)^## 攻击链路\s*\n(.*?)(?=^## |\Z)", report_body
     )
     chain_text = chain_match.group(1) if chain_match else ""
+    burp_match = re.search(
+        r"(?ms)^### Burp 复现\s*\n(.*?)(?=^### |^## |\Z)", report_body
+    )
+    burp_text = burp_match.group(1) if burp_match else ""
+    burp_request_packet_present = any(
+        HTTP_REQUEST_LINE.search(block)
+        for block in re.findall(r"(?ms)^```http\s*\n(.*?)^```\s*$", burp_text)
+    )
+    has_http_request_evidence = case["kind"] == "http" and any(
+        item.get("request") for item in case["evidence"]
+    )
+    unclear_report_shorthand_found = [
+        term for term in UNCLEAR_REPORT_TERMS if term in report_body
+    ]
+    if STATUS_LENGTH_SHORTHAND.search(report_body):
+        unclear_report_shorthand_found.append("状态码/响应字节数连写")
+    if INTERNAL_VALUE_SHORTHAND.search(report_body):
+        unclear_report_shorthand_found.append("内部变量名和值连写")
     chain_requests = []
     chain_shell_commands = []
     evidence_command_names = {
@@ -659,6 +686,11 @@ def metrics(case, report):
             if case["kind"] == "non_http"
             else None
         ),
+        "burp_request_packet_required": has_http_request_evidence,
+        "burp_request_packet_present": (
+            burp_request_packet_present if has_http_request_evidence else None
+        ),
+        "unclear_report_shorthand_found": unclear_report_shorthand_found,
         "semantic_quality": "未自动判定；原文匹配和字数不能证明结论正确或文字易读",
     }
 

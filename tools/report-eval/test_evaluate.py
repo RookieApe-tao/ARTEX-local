@@ -257,6 +257,56 @@ class ReportEvaluationTest(unittest.TestCase):
         )
         self.assertEqual(inaccurate["attack_chain_shell_commands_missing"], commands)
 
+    def test_http_reports_flag_missing_burp_packets_and_unclear_shorthand(self):
+        case = EVAL.cases_by_id()["idor"]
+        report = "\n".join([
+            "# 作业权限问题",
+            "## 描述",
+            "观察到设置变化。",
+            "### 定级依据",
+            "影响已限定。",
+            "## 修复建议",
+            "校验资源归属。",
+            "## 测试过程",
+            "### 发现过程与攻击思路",
+            "测试时间：2026-11-01 10:00:00（北京时间）",
+            "步骤。",
+            "### 失败尝试与未验证项",
+            "其他影响未验证。",
+            "### Burp 复现",
+            "本次未在 Burp 中发送，见建议步骤。",
+            "## 攻击链路",
+            "```text",
+            "用户入口",
+            "└─ GET /api/jobs/job-a",
+            "   └─ 返回 200/1382B，held=alice",
+            "```",
+            "## 证据说明",
+            "来源为离线样本。",
+            "### 复测标准",
+            "请求应被拒绝。",
+        ])
+        measured = EVAL.metrics(case, EVAL.attach_evidence(case, report))
+        self.assertTrue(measured["burp_request_packet_required"])
+        self.assertFalse(measured["burp_request_packet_present"])
+        self.assertEqual(
+            measured["unclear_report_shorthand_found"],
+            ["状态码/响应字节数连写", "内部变量名和值连写"],
+        )
+
+        with_packet = report.replace(
+            "本次未在 Burp 中发送，见建议步骤。",
+            "本次未在 Burp 中发送。建议复测请求（未发送）：\n\n"
+            "```http\nGET /api/jobs/job-a HTTP/1.1\n"
+            "Host: <授权目标域名>\nAuthorization: <重新登录后捕获的会话>\n```",
+        )
+        with_packet = with_packet.replace("返回 200/1382B，held=alice", "作业信息可读取")
+        measured_with_packet = EVAL.metrics(
+            case, EVAL.attach_evidence(case, with_packet)
+        )
+        self.assertTrue(measured_with_packet["burp_request_packet_present"])
+        self.assertFalse(measured_with_packet["unclear_report_shorthand_found"])
+
     def test_live_evaluation_only_accepts_loopback_and_renders_cvss_header(self):
         for url in ("https://example.com", "http://127.0.0.1.evil.test:8787", "http://user:placeholder@127.0.0.1:8787"):
             with self.subTest(url=url), self.assertRaises(ValueError):
