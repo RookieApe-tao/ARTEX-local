@@ -101,6 +101,8 @@ class ReportEvaluationTest(unittest.TestCase):
             self.assertIn("GET /api/files/file-a/download HTTP/1.1", final)
             self.assertIn("Content-Length: 48", final)
             self.assertIn("响应（正文未取得）", final)
+            evaluation = EVAL.read_json(folder / "report-evaluation.json")
+            self.assertEqual(evaluation["cases"]["incomplete"]["status"], "人工审阅待完成")
             stored_draft = (folder / "drafts" / "incomplete.md").read_text(encoding="utf-8")
             self.assertNotIn("GET /api/files/file-a/download HTTP/1.1", stored_draft)
 
@@ -129,6 +131,25 @@ class ReportEvaluationTest(unittest.TestCase):
             self.assertFalse(comparison["comparison_complete"])
             self.assertTrue(any("model 不一致" in item for item in comparison["limitations"]))
             self.assertTrue(any("缺少模型产出" in item for item in comparison["limitations"]))
+
+    def test_partial_run_can_be_reviewed_but_not_counted_as_full_comparison(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            partial = root / "partial"
+            self.prepare(partial, "fixture-model")
+            meta = EVAL.read_json(partial / "run.json")
+            meta["corpus_sha256"] = {"idor": meta["corpus_sha256"]["idor"]}
+            EVAL.write_json(partial / "run.json", meta)
+            reviewed = EVAL.review_run(partial)
+            self.assertEqual(set(reviewed["cases"]), {"idor"})
+
+            comparison_path = root / "comparison.json"
+            EVAL.compare(argparse.Namespace(
+                before=str(partial), after=str(partial), output=str(comparison_path),
+            ))
+            comparison = EVAL.read_json(comparison_path)
+            self.assertFalse(comparison["comparison_complete"])
+            self.assertTrue(any("未包含全部固定样本" in item for item in comparison["limitations"]))
 
     def test_report_format_metrics_do_not_claim_semantic_quality(self):
         material = EVAL.cases()[0]
@@ -402,6 +423,54 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertTrue(measured_incomplete["burp_request_packet_present"])
         self.assertIsNone(measured_incomplete["burp_request_packet_matches_evidence"])
 
+    def test_redacted_sensitive_identity_headers_match_evidence(self):
+        case = EVAL.cases_by_id()["session"]
+        report = "\n".join([
+            "# 退出后会话仍有效",
+            "## 描述",
+            "样本观察到退出后仍能访问用户接口。",
+            "### 定级依据",
+            "真实数据影响待复核。",
+            "## 修复建议",
+            "退出时使当前会话立即失效。",
+            "## 测试过程",
+            "测试时间：2026-11-01 10:00:00（北京时间）",
+            "### 发现过程与攻击思路",
+            "使用同一会话请求退出前后接口。",
+            "### 失败尝试与未验证项",
+            "最长有效时间未验证。",
+            "### Burp 复现",
+            "离线合成请求未发送到真实目标。",
+            "```http",
+            "GET /api/me HTTP/1.1",
+            "Host: report-eval.invalid",
+            "Cookie: [REDACTED]",
+            "Content-Length: 0",
+            "```",
+            "## 攻击链路",
+            "```text",
+            "会话访问",
+            "└─ GET /api/me",
+            "   └─ 返回合成用户记录",
+            "```",
+            "## 证据说明",
+            "证据来自离线合成报文。",
+            "### 复测标准",
+            "退出后重放应被拒绝。",
+        ])
+        report = EVAL.attach_evidence(case, report)
+        measured = EVAL.metrics(case, report)
+        self.assertTrue(measured["burp_request_identity_headers_match_evidence"])
+
+        wrong_cookie = report.replace(
+            "Cookie: [REDACTED]", "Cookie: session=attacker"
+        )
+        self.assertFalse(
+            EVAL.metrics(case, wrong_cookie)[
+                "burp_request_identity_headers_match_evidence"
+            ]
+        )
+
     def test_non_http_and_remediation_guardrail_metrics(self):
         case = EVAL.cases_by_id()["non-http"]
         report = "\n".join([
@@ -409,6 +478,7 @@ class ReportEvaluationTest(unittest.TestCase):
             "CVSS 4.0：" + case["facts"]["cvss_vector"],
             "## 描述",
             "读取到固定合成记录，未验证真实数据影响。",
+            "离线合成场景，未测试真实目标。",
             "### 定级依据",
             "向量中的影响是假设，实际影响待复核。",
             "## 修复建议",
@@ -438,6 +508,10 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertEqual(measured["remediation_alternative_terms_found"], [])
         self.assertFalse(measured["remediation_conditional_fix_detected"])
         self.assertEqual(measured["synthetic_confidentiality_claim_terms_found"], [])
+        self.assertTrue(measured["synthetic_target_scope_present"])
+
+        without_scope = report.replace("离线合成场景，未测试真实目标。\n", "")
+        self.assertFalse(EVAL.metrics(case, without_scope)["synthetic_target_scope_present"])
 
         fabricated_packet = report.replace(
             "Burp 不适用：本次通过本地命令验证。",

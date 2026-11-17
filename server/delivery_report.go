@@ -10,6 +10,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -492,7 +493,7 @@ func ensureDeliveryBurpRequestFence(content string) string {
 	return strings.Join(formatted, "\n")
 }
 
-func ensureDeliveryBurpSection(content, evidencePacket, evidenceTransport string) string {
+func ensureDeliveryBurpSection(content, evidencePacket, evidenceTransport string, synthetic bool) string {
 	if evidenceTransport == "non-http" || evidenceTransport == "non_http" {
 		return ensureDeliveryNonHTTPBurpSection(content)
 	}
@@ -531,25 +532,32 @@ func ensureDeliveryBurpSection(content, evidencePacket, evidenceTransport string
 		return content
 	}
 	section := strings.Join(strings.Split(content, "\n")[sectionStart+1:sectionEnd], "\n")
-	if strings.Contains(section, "Burp 不适用") {
-		section = strings.ReplaceAll(section, "Burp 不适用", "本次未在 Burp 中发送；以下为建议复测请求（未发送）")
-		content = replaceDeliveryBurpSection(content, sectionStart, sectionEnd, section)
-		sectionStart, sectionEnd = deliveryBurpSectionRange(content)
-		section = strings.Join(strings.Split(content, "\n")[sectionStart+1:sectionEnd], "\n")
+	packet := deliveryBurpEvidenceRequest(evidencePacket)
+	packetMissing := packet == ""
+	if packetMissing {
+		packet = "<METHOD> <PATH> HTTP/1.1\r\nHost: <需从授权账号重新捕获>"
 	}
-	if !containsDeliveryHTTPRequest(section) {
-		packet := deliveryBurpEvidenceRequest(evidencePacket)
-		if packet == "" {
-			packet = "<METHOD> <PATH> HTTP/1.1\r\nHost: <需从授权账号重新捕获>"
-			section += "\n材料未记录完整请求字段；此模板不能直接发送，需从授权账号重新捕获。"
-		}
-		section += "\n```http\n" + packet + "\n```"
-		content = replaceDeliveryBurpSection(content, sectionStart, sectionEnd, section)
-	} else if !strings.Contains(section, "建议复测请求") && !strings.Contains(section, "本次使用 Burp") && !strings.Contains(section, "本次在 Burp") {
-		section = "材料未记录是否实际在 Burp Repeater 中发送；以下为建议复测请求（未发送）。\n" + strings.TrimSpace(section)
-		content = replaceDeliveryBurpSection(content, sectionStart, sectionEnd, section)
+	section = deliveryBurpStatusLine(section, synthetic) + "\n"
+	if packetMissing {
+		section += "材料未包含可复用的原始请求字段；此模板不能直接发送，需重新捕获完整请求。\n"
 	}
+	section += "```http\n" + packet + "\n```"
+	content = replaceDeliveryBurpSection(content, sectionStart, sectionEnd, section)
 	return ensureDeliveryBurpRequestFence(content)
+}
+
+func deliveryBurpStatusLine(section string, synthetic bool) string {
+	if synthetic {
+		return "离线合成请求未发送到真实目标；以下是 Burp Repeater 请求样例。"
+	}
+	if strings.Contains(section, "本次未在 Burp") || strings.Contains(section, "未实际使用 Burp") ||
+		strings.Contains(section, "建议复测请求") || strings.Contains(section, "未发送") || strings.Contains(section, "Burp 不适用") {
+		return "本次未在 Burp Repeater 中发送；以下为建议复测请求（未发送）。"
+	}
+	if strings.Contains(section, "本次使用 Burp") || strings.Contains(section, "本次在 Burp") || strings.Contains(section, "实际在 Burp") {
+		return "本次使用 Burp Repeater 发送了以下请求。"
+	}
+	return "材料未记录 Burp Repeater 发送情况；以下请求包可用于复测。"
 }
 
 func ensureDeliveryNonHTTPBurpSection(content string) string {
@@ -559,6 +567,135 @@ func ensureDeliveryNonHTTPBurpSection(content string) string {
 		return strings.TrimSpace(content) + "\n\n### Burp 复现\n" + body
 	}
 	return replaceDeliveryBurpSection(content, start, end, body)
+}
+
+func ensureDeliverySyntheticBoundary(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return content
+	}
+	hasSyntheticScope := strings.Contains(content, "离线合成") || strings.Contains(content, "合成样本") || strings.Contains(content, "合成场景")
+	hasRealTargetLimit := strings.Contains(content, "未测试真实目标") || strings.Contains(content, "未访问真实目标") || strings.Contains(content, "未测试真实系统")
+	if hasSyntheticScope && hasRealTargetLimit {
+		return content
+	}
+	return "离线合成场景，未测试真实目标。\n\n" + content
+}
+
+func normalizeDeliverySyntheticText(content string) string {
+	lines := strings.Split(content, "\n")
+	insideFence := false
+	normalizeFenceContent := false
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if strings.HasPrefix(trimmed, "```") {
+			if !insideFence {
+				language := strings.Fields(strings.TrimPrefix(trimmed, "```"))
+				normalizeFenceContent = len(language) > 0 && language[0] == "text"
+				insideFence = true
+			} else {
+				insideFence = false
+				normalizeFenceContent = false
+			}
+			continue
+		}
+		if insideFence && !normalizeFenceContent {
+			continue
+		}
+		lines[index] = normalizeDeliverySyntheticTextLine(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func normalizeDeliverySyntheticTextLine(content string) string {
+	replacements := strings.NewReplacer(
+		"本地低权限导致样本机密性潜在受损，真实影响未验证", "VC:L 为待复核的潜在影响假设，真实数据影响未验证",
+		"样本机密性潜在受损，真实影响未验证", "VC:L 为待复核的潜在影响假设，真实数据影响未验证",
+		"VC:L 基于能读取合成样本内容", "VC:L 为待复核的潜在影响假设",
+		"真实机密性影响未验证", "真实数据影响未验证",
+		"机密性潜在受损", "VC:L 为待复核的潜在影响假设",
+		"机密性受损", "真实数据影响未验证",
+		"未验证敏感数据泄露", "未验证真实数据影响",
+		"敏感数据泄露", "文件内容读取",
+		"访问敏感数据", "读取文件内容",
+		"读取敏感数据", "读取文件内容",
+		"泄露敏感数据", "读取文件内容",
+		"敏感数据", "相关内容",
+		"owner 为", "所有者为",
+		"或具备显式管理权限", "",
+		"作业所有者或授权协作者", "作业所有者",
+		"资源所有者或授权协作者", "资源所有者",
+		"所有者或授权协作者", "所有者",
+		"items=[reg-1, reg-2, reg-3]", "查询结果包含 3 条记录（编号 reg-1、reg-2、reg-3）",
+		"返回 ok=true", "操作成功",
+		"ok=true", "操作成功",
+		"ok:true", "操作成功",
+		"返回成功标记", "操作成功",
+		"返回 操作成功", "操作成功",
+		"返回操作成功", "操作成功",
+		"selectedTypes为空", "所选类型为空",
+		"selectedTypes含name", "所选类型为 name",
+		"state为WAITING", "作业状态为等待中",
+		"state为SUCCESS", "作业状态变为已完成",
+		" (Exit Code 1)", "（退出码 1）",
+		"属主或授权组", "属主",
+	)
+	content = replacements.Replace(content)
+	content = regexp.MustCompile(`(?:作业|资源)?所有者\s*或\s*(?:拥有|具备|有)?\s*共享授权`).ReplaceAllString(content, "作业所有者")
+	content = regexp.MustCompile(`selectedTypes\s*由\s*空变为\s*name`).ReplaceAllString(content, "所选类型由空变为 name")
+	content = regexp.MustCompile(`selectedTypes\s*从\s*空变为\s*name`).ReplaceAllString(content, "所选类型由空变为 name")
+	content = regexp.MustCompile(`selectedTypes\s*为空`).ReplaceAllString(content, "所选类型为空")
+	content = regexp.MustCompile(`selectedTypes\s*设为\s*\[?"?name"?\]?`).ReplaceAllString(content, "所选类型设为 name")
+	content = regexp.MustCompile(`selectedTypes\s*已变`).ReplaceAllString(content, "所选类型已变")
+	content = regexp.MustCompile(`selectedTypes\s*(?:含|变为)\s*\[?"?name"?\]?`).ReplaceAllString(content, "所选类型为 name")
+	content = regexp.MustCompile(`state\s*(?:由|从)\s*WAITING\s*变为\s*SUCCESS`).ReplaceAllString(content, "作业状态由等待中变为已完成")
+	content = regexp.MustCompile(`state\s*为\s*WAITING`).ReplaceAllString(content, "作业状态为等待中")
+	content = regexp.MustCompile(`state\s*变为\s*SUCCESS`).ReplaceAllString(content, "作业状态变为已完成")
+	content = regexp.MustCompile(`state\s*和\s*formalAvailable\s*状态变更`).ReplaceAllString(content, "作业状态与正式文件可用状态变更")
+	content = regexp.MustCompile(`formalAvailable\s*状态变更`).ReplaceAllString(content, "正式文件可用状态变更")
+	content = regexp.MustCompile(`formalAvailable\s*变为\s*true`).ReplaceAllString(content, "正式文件已可用")
+	content = regexp.MustCompile(`\btotal\s*(?:=|:|：|为|是)\s*(\d+)\b`).ReplaceAllString(content, "记录数为 $1")
+	content = regexp.MustCompile(`(?i)\bid\s*(?:=|为|是|:|：)?\s*(reg-\d+)\b`).ReplaceAllString(content, "新记录编号为 $1")
+	content = regexp.MustCompile(`操作成功(?:[，,、]\s*操作成功)+`).ReplaceAllString(content, "操作成功")
+	content = regexp.MustCompile(`\bitems\s*(?:含|包含)\s*reg-\d+(?:/\d+)*\b`).ReplaceAllStringFunc(content, func(match string) string {
+		return fmt.Sprintf("查询结果包含 %d 条记录", strings.Count(match, "/")+1)
+	})
+	content = strings.ReplaceAll(content, "selectedTypes", "所选类型")
+	content = strings.ReplaceAll(content, "formalAvailable", "正式文件可用状态")
+	content = strings.ReplaceAll(content, "state", "作业状态")
+	content = strings.NewReplacer("返回 操作成功", "操作成功", "返回操作成功", "操作成功").Replace(content)
+	permissionAlternatives := regexp.MustCompile(`[（(]如\s*600\s*或\s*640[）)]`)
+	content = permissionAlternatives.ReplaceAllString(content, "")
+	return content
+}
+
+func ensureDeliveryDraftRatingHeading(content string) string {
+	const heading = "### 定级依据"
+	if strings.Contains(content, heading) {
+		return content
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return heading + "\n定级依据未记录；CVSS 影响项需结合已验证证据复核。"
+	}
+	for _, marker := range []string{"VC:", "CVSS", "评分", "定级"} {
+		position := strings.Index(content, marker)
+		if position < 0 {
+			continue
+		}
+		boundary := strings.LastIndexAny(content[:position], "。！？\n")
+		if boundary < 0 {
+			break
+		}
+		_, size := utf8.DecodeRuneInString(content[boundary:])
+		prefix := strings.TrimSpace(content[:boundary+size])
+		rationale := strings.TrimSpace(content[boundary+size:])
+		if prefix != "" && rationale != "" {
+			return prefix + "\n\n" + heading + "\n" + rationale
+		}
+		break
+	}
+	return content + "\n\n" + heading + "\n定级依据未单独记录；CVSS 影响项需结合已验证证据复核。"
 }
 
 func ensureDeliveryDraftFailureHeading(content string) string {
@@ -645,13 +782,16 @@ func deliveryBurpEvidenceRequest(packet string) string {
 	lines := strings.Split(strings.ReplaceAll(packet, "\r\n", "\n"), "\n")
 	type candidate struct {
 		request string
+		label   string
 		proof   bool
 	}
 	var candidates []candidate
 	for index := 0; index < len(lines); {
 		start := index
 		proof := false
+		label := ""
 		if isDeliveryEvidencePacketLabel(lines[index]) {
+			label = strings.TrimSpace(lines[index])
 			proof = strings.Contains(lines[index], "漏洞验证")
 			start++
 		}
@@ -671,22 +811,50 @@ func deliveryBurpEvidenceRequest(packet string) string {
 			request := strings.TrimSpace(strings.Join(lines[requestStart:requestEnd], "\r\n"))
 			request = redactDeliveryPacket(request)
 			request = normalizeDeliveryRequestContentLength(request)
-			candidates = append(candidates, candidate{request: request, proof: proof})
+			candidates = append(candidates, candidate{request: request, label: label, proof: proof})
 		}
 		if end == len(lines) {
 			break
 		}
 		index = end
 	}
+	bestScore := -1 << 30
+	bestRequest := ""
 	for _, item := range candidates {
+		score := deliveryBurpEvidenceRequestScore(item.label, item.request)
 		if item.proof {
-			return item.request
+			score += 1000
+		}
+		if score > bestScore {
+			bestScore = score
+			bestRequest = item.request
 		}
 	}
-	if len(candidates) > 0 {
-		return candidates[0].request
+	return bestRequest
+}
+
+func deliveryBurpEvidenceRequestScore(label, request string) int {
+	for _, term := range []string{"无身份", "不带身份", "未授权", "无凭证", "缺少编号", "缺少业务编号", "匿名"} {
+		if strings.Contains(label, term) {
+			return -1000
+		}
 	}
-	return ""
+	score := 0
+	for _, term := range []string{"漏洞验证", "越权", "他人", "其他用户", "并发提交", "并发请求", "提交修改", "修改", "写入", "删除", "上传", "创建", "执行", "注入", "真条件", "假条件", "下载", "重放", "释放锁", "占位"} {
+		if strings.Contains(label, term) {
+			score += 10
+		}
+	}
+	for _, term := range []string{"基线", "修改前", "修改后", "回读", "对照", "正常查询", "退出前", "登录前"} {
+		if strings.Contains(label, term) {
+			score -= 20
+		}
+	}
+	method := strings.Fields(request)
+	if len(method) > 0 && method[0] != http.MethodGet && method[0] != http.MethodHead {
+		score++
+	}
+	return score
 }
 
 func isDeliveryEvidencePacketLabel(line string) bool {
@@ -873,6 +1041,84 @@ func ensureDeliveryAttackChainTextFence(content string) string {
 	return ensureDeliveryAttackChainTextFenceWithEvidence(content, "", false)
 }
 
+func normalizeDeliveryAttackChainGroupBranches(content string) string {
+	lines := strings.Split(content, "\n")
+	type group struct {
+		index  int
+		label  string
+		branch string
+	}
+	groups := make([]group, 0, 2)
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		marked := false
+		for _, branch := range []string{"├─", "└─"} {
+			if strings.HasPrefix(trimmed, branch) {
+				trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, branch))
+				marked = true
+				break
+			}
+		}
+		for _, candidate := range []group{{label: "主流程", branch: "├─"}, {label: "独立对照", branch: "└─"}} {
+			if trimmed == candidate.label {
+				candidate.index = index
+				groups = append(groups, candidate)
+				if marked {
+					groups[len(groups)-1].branch = candidate.branch
+				}
+			}
+		}
+	}
+	for groupIndex, current := range groups {
+		groupIndent := 0
+		if current.index > 0 {
+			groupIndent = 3
+		}
+		lines[current.index] = strings.Repeat(" ", groupIndent) + current.branch + " " + current.label
+		end := len(lines)
+		for nextIndex := groupIndex + 1; nextIndex < len(groups); nextIndex++ {
+			if groups[nextIndex].index > current.index {
+				end = groups[nextIndex].index
+				break
+			}
+		}
+		firstChildIndentTarget := groupIndent + 3
+		indentOffset := 0
+		for index := current.index + 1; index < end; index++ {
+			if strings.TrimSpace(lines[index]) == "" {
+				continue
+			}
+			_, firstChildIndent := deliveryAttackTreeIndent(lines[index])
+			indentOffset = firstChildIndent - firstChildIndentTarget
+			break
+		}
+		for index := current.index + 1; index < end; index++ {
+			line := lines[index]
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			leadingIndent, visibleIndent := deliveryAttackTreeIndent(line)
+			leadingIndent -= indentOffset
+			visibleIndent -= indentOffset
+			if visibleIndent < firstChildIndentTarget {
+				leadingIndent += firstChildIndentTarget - visibleIndent
+			}
+			lines[index] = strings.Repeat(" ", leadingIndent) + strings.TrimLeft(line, " \t")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func deliveryAttackTreeIndent(line string) (int, int) {
+	leadingIndent := len(line) - len(strings.TrimLeft(line, " \t"))
+	visibleIndent := leadingIndent
+	trimmed := strings.TrimLeft(line, " \t")
+	if markerOffset := strings.IndexAny(trimmed, "├└"); markerOffset > 0 && strings.ContainsRune(trimmed[:markerOffset], '│') {
+		visibleIndent += utf8.RuneCountInString(trimmed[:markerOffset])
+	}
+	return leadingIndent, visibleIndent
+}
+
 func ensureDeliveryAttackChainTextFenceWithEvidence(content, requestPacket string, allowConcurrentNormalization bool) string {
 	content = strings.TrimSpace(content)
 	if strings.HasPrefix(content, "```") {
@@ -886,6 +1132,7 @@ func ensureDeliveryAttackChainTextFenceWithEvidence(content, requestPacket strin
 	if chain, ok := normalizeExplicitDownArrowChain(content); ok {
 		content = chain
 	}
+	content = normalizeDeliveryAttackChainGroupBranches(content)
 	lines := strings.Split(content, "\n")
 	nodes := make([]string, 0, len(lines))
 	treeLines := make([]string, 0, len(lines))
@@ -958,9 +1205,131 @@ func ensureDeliveryAttackChainTextFenceWithEvidence(content, requestPacket strin
 	}
 	content = strings.Join(normalizeDeliveryAttackTreeBranches(strings.Split(content, "\n")), "\n")
 	content = strings.Join(normalizeFlatDeliveryAttackChain(strings.Split(content, "\n"), requestPacket, allowConcurrentNormalization), "\n")
+	content = normalizeDeliveryIndependentAttackBranches(content)
+	content = normalizeDeliveryAttackChainGroupBranches(content)
 	content = strings.Join(normalizeDeliveryAttackTreeBranches(strings.Split(content, "\n")), "\n")
 	content = ensureDeliveryAttackChainRoot(content)
+	content = normalizeDeliveryAttackChainRootIndent(content)
 	return "```text\n" + content + "\n```"
+}
+
+func normalizeDeliveryIndependentAttackBranches(content string) string {
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		_, _, value, ok := deliveryAttackTreeLine(line)
+		if ok && value == "独立对照" {
+			return content
+		}
+	}
+	type nodeLine struct {
+		indent int
+		marker string
+		value  string
+		line   string
+	}
+	var independent [][]nodeLine
+	var removeRanges [][2]int
+	controlTerms := []string{"缺少业务编号", "缺少编号", "无身份", "不带身份", "匿名", "未授权", "错误凭证", "无效凭证"}
+	for index, line := range lines {
+		indent, _, value, ok := deliveryAttackTreeLine(line)
+		if !ok || deliveryHTTPMethod(value) == "" {
+			continue
+		}
+		isControl := false
+		for _, term := range controlTerms {
+			if strings.Contains(value, term) {
+				isControl = true
+				break
+			}
+		}
+		if !isControl {
+			continue
+		}
+		end := index + 1
+		for end < len(lines) {
+			if strings.TrimSpace(lines[end]) == "" {
+				end++
+				continue
+			}
+			nextIndent, _, _, isNode := deliveryAttackTreeLine(lines[end])
+			if isNode && nextIndent <= indent {
+				break
+			}
+			end++
+		}
+		subtree := make([]nodeLine, 0, end-index)
+		for childIndex := index; childIndex < end; childIndex++ {
+			childIndent, childMarker, childValue, isNode := deliveryAttackTreeLine(lines[childIndex])
+			if !isNode {
+				continue
+			}
+			subtree = append(subtree, nodeLine{indent: childIndent, marker: childMarker, value: childValue})
+		}
+		if len(subtree) == 0 {
+			continue
+		}
+		independent = append(independent, subtree)
+		removeRanges = append(removeRanges, [2]int{index, end})
+	}
+	if len(independent) == 0 {
+		return content
+	}
+	for index := len(removeRanges) - 1; index >= 0; index-- {
+		start, end := removeRanges[index][0], removeRanges[index][1]
+		lines = append(lines[:start], lines[end:]...)
+	}
+	lines = append(lines, "   └─ 独立对照")
+	for _, subtree := range independent {
+		baseIndent := subtree[0].indent
+		for _, node := range subtree {
+			indent := 6 + node.indent - baseIndent
+			if indent < 6 {
+				indent = 6
+			}
+			lines = append(lines, strings.Repeat(" ", indent)+node.marker+" "+node.value)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func deliveryAttackTreeLine(line string) (int, string, string, bool) {
+	indent := len(line) - len(strings.TrimLeft(line, " \t"))
+	trimmed := strings.TrimLeft(line, " \t")
+	markerIndex := strings.IndexAny(trimmed, "├└")
+	if markerIndex < 0 || !strings.HasPrefix(trimmed[markerIndex:], "├─") && !strings.HasPrefix(trimmed[markerIndex:], "└─") {
+		return 0, "", "", false
+	}
+	if strings.ContainsRune(trimmed[:markerIndex], '│') {
+		indent += utf8.RuneCountInString(trimmed[:markerIndex])
+	}
+	marker := trimmed[markerIndex : markerIndex+len("├─")]
+	value := strings.TrimSpace(trimmed[markerIndex+len("├─"):])
+	return indent, marker, value, true
+}
+
+func normalizeDeliveryAttackChainRootIndent(content string) string {
+	lines := strings.Split(content, "\n")
+	firstChild := -1
+	for index := 1; index < len(lines); index++ {
+		if strings.TrimSpace(lines[index]) != "" {
+			firstChild = index
+			break
+		}
+	}
+	if firstChild < 0 {
+		return content
+	}
+	leadingIndent, _ := deliveryAttackTreeIndent(lines[firstChild])
+	trimmed := strings.TrimLeft(lines[firstChild], " \t")
+	if leadingIndent != 0 || (!strings.HasPrefix(trimmed, "├─") && !strings.HasPrefix(trimmed, "└─")) {
+		return content
+	}
+	for index := firstChild; index < len(lines); index++ {
+		if strings.TrimSpace(lines[index]) != "" {
+			lines[index] = "   " + lines[index]
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func ensureDeliveryAttackChainRoot(content string) string {
@@ -1449,11 +1818,19 @@ func parseDeliveryReportDraft(
 	draft.Description = normalizeDeliveryDraftSubheadings(draft.Description, "定级依据")
 	draft.TestProcess = normalizeDeliveryDraftSubheadings(draft.TestProcess, "发现过程与攻击思路", "失败尝试与未验证项", "Burp 复现")
 	draft.TestProcess = ensureDeliveryDraftDiscoveryHeading(draft.TestProcess)
-	draft.TestProcess = ensureDeliveryBurpSection(draft.TestProcess, input["request_packet"], input["evidence_transport"])
+	draft.TestProcess = ensureDeliveryBurpSection(
+		draft.TestProcess,
+		input["request_packet"],
+		input["evidence_transport"],
+		strings.EqualFold(strings.TrimSpace(input["synthetic"]), "true"),
+	)
 	draft.TestProcess = ensureDeliveryDraftFailureHeading(draft.TestProcess)
 	draft.TestProcess = ensureDeliveryBurpRequestFence(draft.TestProcess)
 	draft.DiscoveryPath = normalizeDeliveryDraftSubheadings(draft.DiscoveryPath, "复测标准")
 	draft.Description = stripDeliveryDraftSectionHeading(draft.Description, "描述")
+	if strings.EqualFold(strings.TrimSpace(input["synthetic"]), "true") {
+		draft.Description = ensureDeliverySyntheticBoundary(draft.Description)
+	}
 	draft.Remediation = stripDeliveryDraftSectionHeading(draft.Remediation, "修复建议")
 	draft.Remediation = stripDeliveryDraftSectionHeading(draft.Remediation, "修复")
 	draft.TestProcess = stripDeliveryDraftSectionHeading(draft.TestProcess, "测试过程")
@@ -1469,6 +1846,14 @@ func parseDeliveryReportDraft(
 	)
 	draft.DiscoveryPath = stripDeliveryDraftSectionHeading(draft.DiscoveryPath, "证据说明")
 	draft.DiscoveryPath = stripRedundantDeliveryDraftSubheading(draft.DiscoveryPath, "证据说明")
+	draft.Description = ensureDeliveryDraftRatingHeading(draft.Description)
+	if strings.EqualFold(strings.TrimSpace(input["synthetic"]), "true") {
+		draft.Description = normalizeDeliverySyntheticText(draft.Description)
+		draft.Remediation = normalizeDeliverySyntheticText(draft.Remediation)
+		draft.TestProcess = normalizeDeliverySyntheticText(draft.TestProcess)
+		draft.AttackChain = normalizeDeliverySyntheticText(draft.AttackChain)
+		draft.DiscoveryPath = normalizeDeliverySyntheticText(draft.DiscoveryPath)
+	}
 	if draft.Description == "" || draft.Remediation == "" || draft.TestProcess == "" ||
 		draft.AttackChain == "" || draft.DiscoveryPath == "" {
 		return deliveryReportDraft{}, &deliveryReportOutputError{

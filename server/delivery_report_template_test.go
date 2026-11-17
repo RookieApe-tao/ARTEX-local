@@ -146,6 +146,14 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptHashNeedsTemplateUpgrade(previousV32Hash) {
 		t.Fatal("previous v32 stock prompt would permit synthetic confidentiality impact claims")
 	}
+	const previousV33Hash = "cbb9cdfde209d33d5aee3a52581d3dbb7612b4fc0be99c0dc4076acbb10e0c52"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV33Hash) {
+		t.Fatal("previous v33 stock prompt would omit synthetic scope and permit duplicated Burp prose")
+	}
+	const previousV34Hash = "487018396adc75c029f8864b55ca8d17a6b612376ea75eace5dd88a31ae15016"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV34Hash) {
+		t.Fatal("previous v34 stock prompt would permit a disconnected attack-chain group")
+	}
 	if reporterPromptNeedsTemplateUpgrade(agent.ReporterDefaultPrompt + "\n用户自定义要求。") {
 		t.Fatal("an edited v23 prompt must not be migrated over")
 	}

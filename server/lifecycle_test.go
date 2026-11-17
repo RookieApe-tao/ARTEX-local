@@ -80,14 +80,14 @@ func TestEngineShutdownCancelsAndWaitsTaskRoutines(t *testing.T) {
 }
 
 func TestRedactDeliveryPacketRemovesCredentialFields(t *testing.T) {
-	packet := "POST /test?access_token=query-secret HTTP/1.1\r\nAuthorization: Bearer header-secret\r\nCookie: sid=cookie-secret\r\nContent-Type: application/json\r\n\r\n{\"password\":\"body-secret\",\"profile\":{\"api_key\":\"nested-secret\"}}"
+	packet := "GET /products?name=alpha%27%20AND%201%3D1--%20&access_token=query-secret HTTP/1.1\r\nAuthorization: Bearer header-secret\r\nCookie: sid=cookie-secret\r\nContent-Type: application/json\r\n\r\n{\"password\":\"body-secret\",\"profile\":{\"api_key\":\"nested-secret\"}}"
 	redacted := redactDeliveryPacket(packet)
 	for _, secret := range []string{"query-secret", "header-secret", "cookie-secret", "body-secret", "nested-secret"} {
 		if strings.Contains(redacted, secret) {
 			t.Errorf("redacted packet retains %q: %s", secret, redacted)
 		}
 	}
-	for _, marker := range []string{redactedDeliveryValue, "POST /test?"} {
+	for _, marker := range []string{redactedDeliveryValue, "GET /products?", "name=alpha%27%20AND%201%3D1--%20", "access_token=%5BREDACTED%5D"} {
 		if !strings.Contains(redacted, marker) {
 			t.Errorf("redacted packet omitted %q: %s", marker, redacted)
 		}
