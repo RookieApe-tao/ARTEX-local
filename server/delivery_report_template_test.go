@@ -110,6 +110,10 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptHashNeedsTemplateUpgrade(previousV23Hash) {
 		t.Fatal("previous v23 stock prompt would omit Burp packets when Burp was used")
 	}
+	const previousV24Hash = "506d290c34bc78e4d52d1665b5e740466a379fe803b4cff2e3dc2efca090e371"
+	if !reporterPromptHashNeedsTemplateUpgrade(previousV24Hash) {
+		t.Fatal("previous v24 stock prompt would miss field budgets and de-duplication guidance")
+	}
 	if reporterPromptNeedsTemplateUpgrade(agent.ReporterDefaultPrompt + "\n用户自定义要求。") {
 		t.Fatal("an edited v23 prompt must not be migrated over")
 	}

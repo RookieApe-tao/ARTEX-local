@@ -621,6 +621,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.upgradeReporterDeliveryTemplateV22() // 明确独立对照分支、原样命令和潜在影响边界
 	s.upgradeReporterDeliveryTemplateV23() // 改善 Burp 请求包、报告术语和攻击链可读性
 	s.upgradeReporterDeliveryTemplateV24() // 要求所有 HTTP 报告附 Burp 请求包
+	s.upgradeReporterDeliveryTemplateV25() // 为交付报告增加字段篇幅预算与去重要求
 	s.upgradeReporterTriggerMessage()      // 老库触发消息同步报告版式与链路图规范
 	s.upgradeReporterTriggerMessageV11()   // 移除触发消息中重复的报告写作规则
 	s.seedFindingTrafficTools()            // 增加可选证据参数及只读证据工具，保留用户配置
@@ -796,6 +797,8 @@ func reporterPromptHashNeedsTemplateUpgrade(hash string) bool {
 		"cf8c3a66a8230ab9bf7095d32e7025e56135010936d1f86765acc413ba441023", // v21 证据边界默认提示词
 		"0b3a0eec07ad86b6302a9072399ad5cecf46cf3d21dabd0192ee5277b5191834", // v22 原样命令与证据边界默认提示词
 		"54343d87df0ffdff1aeec0d3e58dd3bd23b7fb138884bc8719cc01ca5e85fe63": // v23 Burp 请求包与可读性默认提示词
+		return true
+	case "506d290c34bc78e4d52d1665b5e740466a379fe803b4cff2e3dc2efca090e371": // v24 必需请求包默认提示词
 		return true
 	default:
 		return false
@@ -1091,6 +1094,39 @@ func (s *Server) upgradeReporterDeliveryTemplateV24() {
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
 		log.Printf("[reporter] 保存必需 Burp 请求包迁移标记失败: %v", err)
+	}
+}
+
+func (s *Server) upgradeReporterDeliveryTemplateV25() {
+	const flag = "reporter_prompt_delivery_template_v25"
+	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[reporter] 读取正文篇幅预算迁移标记失败: %v", err)
+		return
+	} else if value == "true" {
+		return
+	}
+	agentRow, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil {
+		log.Printf("[reporter] 读取 agent 失败: %v", err)
+		return
+	}
+	if agentRow == nil {
+		return
+	}
+	current, err := s.m.pg.CurrentPrompt(agentRow.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取 prompt 失败: %v", err)
+		return
+	}
+	if reporterPromptNeedsTemplateUpgrade(current) {
+		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
+			log.Printf("[reporter] 更新正文篇幅预算提示词失败: %v", err)
+			return
+		}
+		log.Printf("[reporter] 默认提示词已同步字段篇幅预算与事实去重规则")
+	}
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[reporter] 保存正文篇幅预算迁移标记失败: %v", err)
 	}
 }
 

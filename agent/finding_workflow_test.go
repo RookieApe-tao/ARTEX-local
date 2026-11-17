@@ -176,13 +176,17 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 		"独立对照放在单独分支，不得接在主流程结果之后造成因果暗示",
 		"回读查询放在并发组之后",
 		"多条请求不等于并发",
-		"正文尽量控制在 800 字以内，不硬截断",
+		"正文以 800 字为参考预算",
 		"发现过程写测试时间和最多四步",
 		"失败与未验证项最多两句",
-		"每项事实只放一个位置",
+		"每项事实只展开一次",
 		"正文写给开发看",
 		"不要把交付报告的精简要求套到详细报告",
 		"保存前在本次输出中核对结论、限制、修复和链路",
+		"测试过程含请求包不超过 300 字",
+		"攻击链不超过 230 字",
+		"每项事实只展开一次",
+		"没有源码或数据库约束证据时，不直接推荐唯一约束、分布式锁、幂等键等实现",
 	} {
 		if !strings.Contains(DeliveryReportWritingRules, required) {
 			t.Fatalf("delivery report guidance is missing %q", required)
@@ -193,7 +197,7 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 			t.Fatalf("delivery report guidance retains a style blacklist or hard limit: %q", absent)
 		}
 	}
-	if strings.Contains(DeliveryReportWritingRules, "JSON 的 description 字段") || !strings.Contains(DeliveryReportDraftRules, "description 先用两三句写问题") ||
+	if strings.Contains(DeliveryReportWritingRules, "JSON 的 description 字段") || !strings.Contains(DeliveryReportDraftRules, "description 用短句写问题") ||
 		!strings.Contains(DeliveryReportDraftRules, "cvss_vector 优先使用输入提供的有效向量") ||
 		!strings.Contains(DeliveryReportDraftRules, "attack_chain 只写一棵短树。单一流程的根节点使用实际页面或功能入口") ||
 		!strings.Contains(DeliveryReportDraftRules, "格式示例：\n验证请求组\n├─ 主流程") {

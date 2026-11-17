@@ -40,6 +40,55 @@ func TestNormalizeCVSS4BaseVector(t *testing.T) {
 	}
 }
 
+func TestDeliveryReportRequestOccurrenceIndex(t *testing.T) {
+	requestPacket := strings.Join([]string{
+		"证据绑定 1（漏洞验证）",
+		"POST /api/registrations HTTP/1.1",
+		"Host: example.invalid",
+		"",
+		"{}",
+		"",
+		"证据绑定 2（漏洞验证）",
+		"POST /api/registrations HTTP/1.1",
+		"Host: example.invalid",
+		"",
+		"{}",
+	}, "\n")
+	responsePacket := strings.Join([]string{
+		"证据绑定 1（漏洞验证）",
+		"HTTP/1.1 201 Created",
+		"Content-Type: application/json",
+		"",
+		`{"id":"reg-1"}`,
+		"",
+		"证据绑定 2（漏洞验证）",
+		"HTTP/1.1 201 Created",
+		"Content-Type: application/json",
+		"",
+		`{"id":"reg-2"}`,
+	}, "\n")
+	got, err := deliveryReportRequestOccurrenceIndex(requestPacket, responsePacket)
+	if err != nil {
+		t.Fatalf("deliveryReportRequestOccurrenceIndex: %v", err)
+	}
+	var occurrences []struct {
+		Purpose      string `json:"purpose"`
+		RequestLine  string `json:"request_line"`
+		ResponseLine string `json:"response_line"`
+	}
+	if err := json.Unmarshal([]byte(got), &occurrences); err != nil {
+		t.Fatalf("decode occurrence index: %v", err)
+	}
+	if len(occurrences) != 2 {
+		t.Fatalf("occurrence count = %d, want 2: %s", len(occurrences), got)
+	}
+	for index, occurrence := range occurrences {
+		if occurrence.RequestLine != "POST /api/registrations" || occurrence.ResponseLine != "HTTP/1.1 201 Created" || !strings.Contains(occurrence.Purpose, "漏洞验证") {
+			t.Errorf("occurrence %d lost its request, purpose, or paired result: %+v", index, occurrence)
+		}
+	}
+}
+
 func TestDeliveryReportWithoutBoundTrafficDoesNotInventPackets(t *testing.T) {
 	request, response, err := (&Server{}).deliveryTrafficPackets(nil)
 	if err != nil {
